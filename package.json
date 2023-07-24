@@ -1,0 +1,18 @@
+{
+  "dependencies": {
+    "localforage": "^1.10.0",
+    "midi-writer-js": "^2.1.4"
+  },
+  "name": "bithovenmain",
+  "description": "## A JavaScript MIDI-Player/ Piano-learning webapp",
+  "version": "1.0.0",
+  "main": "index.js",
+  "directories": {
+    "lib": "lib"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "",
+  "license": "ISC"
+}
