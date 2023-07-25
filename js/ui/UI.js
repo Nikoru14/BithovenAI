@@ -5,7 +5,7 @@ import { createTrackDivs } from "./TrackUI.js"
 import { getCurrentSong, getPlayer } from "../player/Player.js"
 import { SongUI } from "./SongUI.js"
 import { getMidiHandler } from "../MidiInputHandler.js"
-import { MidiWriter } from 'midi-writer-js'
+import MidiRecorder from "../recording/midi-recorder.js"
 
 /**
  * Contains all initiation, appending and manipulation of DOM-elements.
@@ -16,6 +16,8 @@ export class UI {
 		this.isMobile = window.matchMedia(
 			"only screen and (max-width: 1600px)"
 		).matches
+
+		this.midiRecrder = new MidiRecorder()
 
 		this.songUI = new SongUI()
 		//add callbacks to the player
@@ -944,18 +946,20 @@ export class UI {
 	}
 
 	startRecording() {
-
+		this.midiRecrder.startRecording();
 	}
 
 	pauseRecording() {
-
+		this.midiRecrder.pauseRecording();
 	}
 
 	clearRecording() {
-
+		this.midiRecrder.clearRecording();
 	}
 
-	saveRecording() {
-
+	async saveRecording() {
+		let filename = await this.midiRecrder.saveRecording();
+		getPlayer().loadFromRecording(filename);
 	}
+
 }

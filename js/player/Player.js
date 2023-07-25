@@ -12,6 +12,8 @@ import {
 	setupTracks
 } from "./Tracks.js"
 import { Notification } from "../ui/Notification.js"
+import localforage from 'localforage';
+
 
 const LOOK_AHEAD_TIME = 0.2
 const LOOK_AHEAD_TIME_WHEN_PLAYALONG = 0.02
@@ -142,6 +144,45 @@ class Player {
 			getLoader().stopLoad()
 		}
 	}
+
+	async loadFromRecording(fileName, name) {
+		this.audioPlayer.stopAllSources();
+		getLoader().startLoad();
+		getLoader().setLoadMessage("Loading " + fileName + ".");
+
+		if (this.audioPlayer.isRunning()) {
+			this.audioPlayer.suspend();
+		}
+
+		this.loading = true;
+
+		getLoader().setLoadMessage("Retrieving Midi File from localForage.");
+
+		try {
+			// Retrieve the MIDI file from localForage
+			let theSong = await localforage.getItem(fileName);
+
+			if (theSong == null) {
+				throw new Error("No file found with the name " + fileName);
+			}
+
+			getLoader().setLoadMessage("Parsing Midi File.");
+
+			let midiFile = await MidiLoader.loadFile(theSong);
+			this.setSong(new Song(midiFile, fileName, name));
+			getLoader().setLoadMessage("Loading Instruments");
+
+			await this.audioPlayer.loadInstrumentsForSong(this.song);
+
+			getLoader().setLoadMessage("Creating Buffers");
+			return this.audioPlayer.loadBuffers().then(v => getLoader().stopLoad());
+		} catch (error) {
+			console.log(error);
+			Notification.create("Couldn't read Midi-File - " + error, 2000);
+			getLoader().stopLoad();
+		}
+	}
+
 
 	setSong(song) {
 		this.pause()
