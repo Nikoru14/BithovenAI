@@ -8643,7 +8643,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony import */ var _player_Player_js__WEBPACK_IMPORTED_MODULE_4__ = __webpack_require__(/*! ../player/Player.js */ "./js/player/Player.js");
 /* harmony import */ var _SongUI_js__WEBPACK_IMPORTED_MODULE_5__ = __webpack_require__(/*! ./SongUI.js */ "./js/ui/SongUI.js");
 /* harmony import */ var _MidiInputHandler_js__WEBPACK_IMPORTED_MODULE_6__ = __webpack_require__(/*! ../MidiInputHandler.js */ "./js/MidiInputHandler.js");
-/* harmony import */ var midi_writer_js__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! midi-writer-js */ "./js/ui/node_modules/midi-writer-js/build/index.js");
+/* harmony import */ var midi_writer_js__WEBPACK_IMPORTED_MODULE_7__ = __webpack_require__(/*! midi-writer-js */ "./node_modules/midi-writer-js/build/index.js");
 /* harmony import */ var midi_writer_js__WEBPACK_IMPORTED_MODULE_7___default = /*#__PURE__*/__webpack_require__.n(midi_writer_js__WEBPACK_IMPORTED_MODULE_7__);
 
 
@@ -9396,9 +9396,45 @@ class UI {
 		}
 		return this.recordButton;
 	}
-	clickRecord(ev) {
+	getRecordingDialog() {
+		if (!this.recordingDialog) {
+			this.recordingDialog = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createDivWithIdAndClass(
+				"recordingDialog",
+				"centeredMenuDiv"
+			);
+			this.hideDiv(this.recordingDialog);
+			document.body.appendChild(this.recordingDialog);
 
+			let text = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createDivWithClass(
+				"centeredBigText",
+				{ marginTop: "25px" },
+				{ innerHTML: "Recording Controls:" }
+			);
+			this.recordingDialog.appendChild(text);
+
+			let recordingControls = this.getRecordingControls.bind(this)();
+			recordingControls.forEach(control => {
+				this.recordingDialog.appendChild(control);
+			});
+
+		}
+		this.recordingDialog.style.marginTop =
+			this.getNavBar().clientHeight + 25 + "px";
+		return this.recordingDialog;
 	}
+
+	clickRecord(ev) {
+		if (this.recordingDialogShown) {
+			this.hideDiv(this.getRecordingDialog());
+			_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.removeClass("selected", this.recordButton)
+			this.recordingDialogShown = false;
+		} else {
+			this.showDiv(this.getRecordingDialog());
+			_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.addClassToElement("selected", this.recordButton)
+			this.recordingDialogShown = true;
+		}
+	}
+
 	resetTrackMenuDiv() {
 		let menuDiv = this.getTrackMenuDiv()
 		menuDiv.innerHTML = ""
@@ -9489,7 +9525,7 @@ class UI {
 					_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.removeClass("selected", deviceDiv)
 					;(0,_MidiInputHandler_js__WEBPACK_IMPORTED_MODULE_6__.getMidiHandler)().clearOutput(device)
 				} else {
-					_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.addClassToElement("sele	cted", deviceDiv)
+					_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.addClassToElement("selected", deviceDiv)
 					;(0,_MidiInputHandler_js__WEBPACK_IMPORTED_MODULE_6__.getMidiHandler)().addOutput(device)
 				}
 			}
@@ -9517,6 +9553,57 @@ class UI {
 			this.hideDiv(this.trackMenuDiv)
 		}
 		return this.trackMenuDiv
+	}
+
+	getRecordingControls() {
+		let startRecordingButton = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createGlyphiconTextButton(
+			"startRecording",
+			"record",
+			"Start Recording",
+			this.startRecording.bind(this)
+		);
+		startRecordingButton.classList.add("recordingControl");
+
+		let pauseRecordingButton = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createGlyphiconTextButton(
+			"pauseRecording",
+			"pause",
+			"Pause Recording",
+			this.pauseRecording.bind(this)
+		);
+		pauseRecordingButton.classList.add("recordingControl");
+		let clearRecordingButton = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createGlyphiconTextButton(
+			"clearRecording",
+			"remove",
+			"Clear Recording",
+			this.clearRecording.bind(this)
+		);
+		clearRecordingButton.classList.add("recordingControl");
+
+		let saveRecordingButton = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createGlyphiconTextButton(
+			"saveRecording",
+			"save",
+			"Save Recording",
+			this.saveRecording.bind(this)
+		);
+		saveRecordingButton.classList.add("recordingControl");
+
+		return [startRecordingButton, pauseRecordingButton, clearRecordingButton, saveRecordingButton];
+	}
+
+	startRecording() {
+
+	}
+
+	pauseRecording() {
+
+	}
+
+	clearRecording() {
+
+	}
+
+	saveRecording() {
+
 	}
 }
 
@@ -9589,15 +9676,15 @@ class ZoomUI {
 
 /***/ }),
 
-/***/ "./js/ui/node_modules/midi-writer-js/build/index.js":
-/*!**********************************************************!*\
-  !*** ./js/ui/node_modules/midi-writer-js/build/index.js ***!
-  \**********************************************************/
+/***/ "./node_modules/midi-writer-js/build/index.js":
+/*!****************************************************!*\
+  !*** ./node_modules/midi-writer-js/build/index.js ***!
+  \****************************************************/
 /***/ ((module, __unused_webpack_exports, __webpack_require__) => {
 
 
 
-var tonalMidi = __webpack_require__(/*! tonal-midi */ "./js/ui/node_modules/tonal-midi/index.js");
+var tonalMidi = __webpack_require__(/*! tonal-midi */ "./node_modules/tonal-midi/index.js");
 
 /**
  * MIDI file format constants.
@@ -11352,10 +11439,10 @@ module.exports = main;
 
 /***/ }),
 
-/***/ "./js/ui/node_modules/note-parser/index.js":
-/*!*************************************************!*\
-  !*** ./js/ui/node_modules/note-parser/index.js ***!
-  \*************************************************/
+/***/ "./node_modules/note-parser/index.js":
+/*!*******************************************!*\
+  !*** ./node_modules/note-parser/index.js ***!
+  \*******************************************/
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
 __webpack_require__.r(__webpack_exports__);
@@ -11570,10 +11657,10 @@ function oct (src) { return (parse(src) || {}).oct }
 
 /***/ }),
 
-/***/ "./js/ui/node_modules/tonal-midi/index.js":
-/*!************************************************!*\
-  !*** ./js/ui/node_modules/tonal-midi/index.js ***!
-  \************************************************/
+/***/ "./node_modules/tonal-midi/index.js":
+/*!******************************************!*\
+  !*** ./node_modules/tonal-midi/index.js ***!
+  \******************************************/
 /***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
 
 __webpack_require__.r(__webpack_exports__);
@@ -11581,7 +11668,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   note: () => (/* binding */ note),
 /* harmony export */   toMidi: () => (/* binding */ toMidi)
 /* harmony export */ });
-/* harmony import */ var note_parser__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! note-parser */ "./js/ui/node_modules/note-parser/index.js");
+/* harmony import */ var note_parser__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! note-parser */ "./node_modules/note-parser/index.js");
 /**
  * A midi note number is a number representation of a note pitch. It can be
  * integers so it's equal tempered tuned, or float to indicate it's not

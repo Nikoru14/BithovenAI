@@ -749,9 +749,45 @@ export class UI {
 		}
 		return this.recordButton;
 	}
-	clickRecord(ev) {
+	getRecordingDialog() {
+		if (!this.recordingDialog) {
+			this.recordingDialog = DomHelper.createDivWithIdAndClass(
+				"recordingDialog",
+				"centeredMenuDiv"
+			);
+			this.hideDiv(this.recordingDialog);
+			document.body.appendChild(this.recordingDialog);
 
+			let text = DomHelper.createDivWithClass(
+				"centeredBigText",
+				{ marginTop: "25px" },
+				{ innerHTML: "Recording Controls:" }
+			);
+			this.recordingDialog.appendChild(text);
+
+			let recordingControls = this.getRecordingControls.bind(this)();
+			recordingControls.forEach(control => {
+				this.recordingDialog.appendChild(control);
+			});
+
+		}
+		this.recordingDialog.style.marginTop =
+			this.getNavBar().clientHeight + 25 + "px";
+		return this.recordingDialog;
 	}
+
+	clickRecord(ev) {
+		if (this.recordingDialogShown) {
+			this.hideDiv(this.getRecordingDialog());
+			DomHelper.removeClass("selected", this.recordButton)
+			this.recordingDialogShown = false;
+		} else {
+			this.showDiv(this.getRecordingDialog());
+			DomHelper.addClassToElement("selected", this.recordButton)
+			this.recordingDialogShown = true;
+		}
+	}
+
 	resetTrackMenuDiv() {
 		let menuDiv = this.getTrackMenuDiv()
 		menuDiv.innerHTML = ""
@@ -842,7 +878,7 @@ export class UI {
 					DomHelper.removeClass("selected", deviceDiv)
 					getMidiHandler().clearOutput(device)
 				} else {
-					DomHelper.addClassToElement("sele	cted", deviceDiv)
+					DomHelper.addClassToElement("selected", deviceDiv)
 					getMidiHandler().addOutput(device)
 				}
 			}
@@ -870,5 +906,56 @@ export class UI {
 			this.hideDiv(this.trackMenuDiv)
 		}
 		return this.trackMenuDiv
+	}
+
+	getRecordingControls() {
+		let startRecordingButton = DomHelper.createGlyphiconTextButton(
+			"startRecording",
+			"record",
+			"Start Recording",
+			this.startRecording.bind(this)
+		);
+		startRecordingButton.classList.add("recordingControl");
+
+		let pauseRecordingButton = DomHelper.createGlyphiconTextButton(
+			"pauseRecording",
+			"pause",
+			"Pause Recording",
+			this.pauseRecording.bind(this)
+		);
+		pauseRecordingButton.classList.add("recordingControl");
+		let clearRecordingButton = DomHelper.createGlyphiconTextButton(
+			"clearRecording",
+			"remove",
+			"Clear Recording",
+			this.clearRecording.bind(this)
+		);
+		clearRecordingButton.classList.add("recordingControl");
+
+		let saveRecordingButton = DomHelper.createGlyphiconTextButton(
+			"saveRecording",
+			"save",
+			"Save Recording",
+			this.saveRecording.bind(this)
+		);
+		saveRecordingButton.classList.add("recordingControl");
+
+		return [startRecordingButton, pauseRecordingButton, clearRecordingButton, saveRecordingButton];
+	}
+
+	startRecording() {
+
+	}
+
+	pauseRecording() {
+
+	}
+
+	clearRecording() {
+
+	}
+
+	saveRecording() {
+
 	}
 }
