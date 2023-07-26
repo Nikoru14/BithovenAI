@@ -958,8 +958,7 @@ export class UI {
 	}
 
 	async saveRecording() {
-		let filename = await this.midiRecrder.saveRecording();
-		getPlayer().loadFromRecording(filename);
+		await this.midiRecrder.saveRecording();
 	}
 
 }

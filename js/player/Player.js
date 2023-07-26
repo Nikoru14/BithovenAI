@@ -159,16 +159,20 @@ class Player {
 		getLoader().setLoadMessage("Retrieving Midi File from localForage.");
 
 		try {
-			// Retrieve the MIDI file from localForage
-			let theSong = await localforage.getItem(fileName);
+			// Retrieve the MIDI file from localforage
+			let theSongBlob = await localforage.getItem(fileName);
 
-			if (theSong == null) {
+			if (theSongBlob == null) {
 				throw new Error("No file found with the name " + fileName);
 			}
 
+			// Convert Blob to URL
+			let theSongURL = URL.createObjectURL(theSongBlob);
+
 			getLoader().setLoadMessage("Parsing Midi File.");
 
-			let midiFile = await MidiLoader.loadFile(theSong);
+			// Pass URL to MidiLoader.loadFile
+			let midiFile = await MidiLoader.loadFile(theSongURL);
 			this.setSong(new Song(midiFile, fileName, name));
 			getLoader().setLoadMessage("Loading Instruments");
 

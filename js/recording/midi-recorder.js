@@ -1,10 +1,10 @@
-import { Track, NoteEvent, Writer } from 'midi-writer-js';
-import localforage from 'localforage';
+import { Midi, Track, Note } from '@tonejs/midi';
 
 class MidiRecorder {
     constructor() {
         this.recording = false;
-        this.track = new Track();
+        this.midi = new Midi();
+        this.track = this.midi.addTrack();
         this.startTime = null;
         this.notesOn = {};
     }
@@ -13,10 +13,18 @@ class MidiRecorder {
         this.recording = true;
         this.startTime = Date.now();
         let midiAccess = await navigator.requestMIDIAccess();
+
+        console.log("MIDI access granted. Enumerating inputs...");
+
         let inputs = midiAccess.inputs.values();
+        let inputCount = 0;
         for (let input of inputs) {
+            console.log(`Setting up message handler for input ${input.id} (${input.name})`);
             input.onmidimessage = this.handleMIDIMessage.bind(this);
+            inputCount++;
         }
+
+        console.log(`${inputCount} MIDI input(s) found.`);
     }
 
     pauseRecording() {
@@ -24,37 +32,50 @@ class MidiRecorder {
     }
 
     clearRecording() {
-        this.track = new Track();
+        this.midi = new Midi();
+        this.track = this.midi.addTrack();
     }
 
     async saveRecording() {
         this.recording = false;
-        let write = new Writer(this.track);
-        let midiBlob = write.blob();
-        let filename = "recording-" + new Date().toISOString() + ".midi";
-        await localforage.setItem(filename, midiBlob);
+        let data = this.midi.toArray();
+        let blob = new Blob([data], { type: "audio/midi" });
+        let filename = "recording-" + new Date().toISOString() + ".mid";
+        saveAs(blob, filename);
         return filename;
     }
 
     handleMIDIMessage(event) {
+        console.log('Received MIDI message', event.data);
         if (!this.recording) return;
-        let [status, note, velocity] = event.data;
-        let deltaTime = Date.now() - this.startTime;
-        if (status === 144) {  // note on
-            this.notesOn[note] = deltaTime;
-        } else if (status === 128) {  // note off
-            let noteOnTime = this.notesOn[note];
+        console.log('Recording is active');
+        let [status, noteNumber, velocity] = event.data;
+        let messageType = status & 0xF0;
+        let deltaTime = (Date.now() - this.startTime) / 1000;  // convert to seconds
+        if (messageType === 0x90 && velocity > 0) {  // note on
+            this.notesOn[noteNumber] = deltaTime;
+            console.log('Note on message received');
+        } else if ((messageType === 0x80) || (messageType === 0x90 && velocity === 0)) {  // note off
+            let noteOnTime = this.notesOn[noteNumber];
             if (noteOnTime !== undefined) {
-                let durationInMilliseconds = deltaTime - noteOnTime;
-                // Convert duration from milliseconds to ticks
-                // 500 ms (a quarter note at 120 BPM) is 128 ticks
-                let durationInTicks = (durationInMilliseconds / 500) * 128;
-                this.track.addEvent(new NoteEvent({ pitch: [note], duration: durationInTicks, velocity: velocity, wait: noteOnTime }));
-                delete this.notesOn[note];
+                let duration = deltaTime - noteOnTime;
+                let channel = status & 0x0F;
+                try {
+                    this.track.addNote({
+                        midi: noteNumber,
+                        time: noteOnTime,
+                        duration: duration,
+                        velocity: velocity / 127,
+                        channel: channel,
+                    });
+                    console.log('Note added to track');
+                } catch (error) {
+                    console.log('Error adding note to track:', error);
+                }
+                delete this.notesOn[noteNumber];
             }
         }
     }
-
 }
 
 export default MidiRecorder;

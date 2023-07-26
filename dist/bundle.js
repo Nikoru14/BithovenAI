@@ -6413,16 +6413,20 @@ class Player {
 		(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().setLoadMessage("Retrieving Midi File from localForage.");
 
 		try {
-			// Retrieve the MIDI file from localForage
-			let theSong = await localforage__WEBPACK_IMPORTED_MODULE_9___default().getItem(fileName);
+			// Retrieve the MIDI file from localforage
+			let theSongBlob = await localforage__WEBPACK_IMPORTED_MODULE_9___default().getItem(fileName);
 
-			if (theSong == null) {
+			if (theSongBlob == null) {
 				throw new Error("No file found with the name " + fileName);
 			}
 
+			// Convert Blob to URL
+			let theSongURL = URL.createObjectURL(theSongBlob);
+
 			(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().setLoadMessage("Parsing Midi File.");
 
-			let midiFile = await _MidiLoader_js__WEBPACK_IMPORTED_MODULE_0__.MidiLoader.loadFile(theSong);
+			// Pass URL to MidiLoader.loadFile
+			let midiFile = await _MidiLoader_js__WEBPACK_IMPORTED_MODULE_0__.MidiLoader.loadFile(theSongURL);
 			this.setSong(new _Song_js__WEBPACK_IMPORTED_MODULE_1__.Song(midiFile, fileName, name));
 			(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().setLoadMessage("Loading Instruments");
 
@@ -6906,17 +6910,15 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ __webpack_require__.d(__webpack_exports__, {
 /* harmony export */   "default": () => (__WEBPACK_DEFAULT_EXPORT__)
 /* harmony export */ });
-/* harmony import */ var midi_writer_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! midi-writer-js */ "./node_modules/midi-writer-js/build/index.js");
-/* harmony import */ var midi_writer_js__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(midi_writer_js__WEBPACK_IMPORTED_MODULE_0__);
-/* harmony import */ var localforage__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! localforage */ "./node_modules/localforage/dist/localforage.js");
-/* harmony import */ var localforage__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(localforage__WEBPACK_IMPORTED_MODULE_1__);
-
+/* harmony import */ var _tonejs_midi__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! @tonejs/midi */ "./node_modules/@tonejs/midi/dist/Midi.js");
+/* harmony import */ var _tonejs_midi__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(_tonejs_midi__WEBPACK_IMPORTED_MODULE_0__);
 
 
 class MidiRecorder {
     constructor() {
         this.recording = false;
-        this.track = new midi_writer_js__WEBPACK_IMPORTED_MODULE_0__.Track();
+        this.midi = new _tonejs_midi__WEBPACK_IMPORTED_MODULE_0__.Midi();
+        this.track = this.midi.addTrack();
         this.startTime = null;
         this.notesOn = {};
     }
@@ -6925,10 +6927,18 @@ class MidiRecorder {
         this.recording = true;
         this.startTime = Date.now();
         let midiAccess = await navigator.requestMIDIAccess();
+
+        console.log("MIDI access granted. Enumerating inputs...");
+
         let inputs = midiAccess.inputs.values();
+        let inputCount = 0;
         for (let input of inputs) {
+            console.log(`Setting up message handler for input ${input.id} (${input.name})`);
             input.onmidimessage = this.handleMIDIMessage.bind(this);
+            inputCount++;
         }
+
+        console.log(`${inputCount} MIDI input(s) found.`);
     }
 
     pauseRecording() {
@@ -6936,37 +6946,50 @@ class MidiRecorder {
     }
 
     clearRecording() {
-        this.track = new midi_writer_js__WEBPACK_IMPORTED_MODULE_0__.Track();
+        this.midi = new _tonejs_midi__WEBPACK_IMPORTED_MODULE_0__.Midi();
+        this.track = this.midi.addTrack();
     }
 
     async saveRecording() {
         this.recording = false;
-        let write = new midi_writer_js__WEBPACK_IMPORTED_MODULE_0__.Writer(this.track);
-        let midiBlob = write.blob();
-        let filename = "recording-" + new Date().toISOString() + ".midi";
-        await localforage__WEBPACK_IMPORTED_MODULE_1___default().setItem(filename, midiBlob);
+        let data = this.midi.toArray();
+        let blob = new Blob([data], { type: "audio/midi" });
+        let filename = "recording-" + new Date().toISOString() + ".mid";
+        saveAs(blob, filename);
         return filename;
     }
 
     handleMIDIMessage(event) {
+        console.log('Received MIDI message', event.data);
         if (!this.recording) return;
-        let [status, note, velocity] = event.data;
-        let deltaTime = Date.now() - this.startTime;
-        if (status === 144) {  // note on
-            this.notesOn[note] = deltaTime;
-        } else if (status === 128) {  // note off
-            let noteOnTime = this.notesOn[note];
+        console.log('Recording is active');
+        let [status, noteNumber, velocity] = event.data;
+        let messageType = status & 0xF0;
+        let deltaTime = (Date.now() - this.startTime) / 1000;  // convert to seconds
+        if (messageType === 0x90 && velocity > 0) {  // note on
+            this.notesOn[noteNumber] = deltaTime;
+            console.log('Note on message received');
+        } else if ((messageType === 0x80) || (messageType === 0x90 && velocity === 0)) {  // note off
+            let noteOnTime = this.notesOn[noteNumber];
             if (noteOnTime !== undefined) {
-                let durationInMilliseconds = deltaTime - noteOnTime;
-                // Convert duration from milliseconds to ticks
-                // 500 ms (a quarter note at 120 BPM) is 128 ticks
-                let durationInTicks = (durationInMilliseconds / 500) * 128;
-                this.track.addEvent(new midi_writer_js__WEBPACK_IMPORTED_MODULE_0__.NoteEvent({ pitch: [note], duration: durationInTicks, velocity: velocity, wait: noteOnTime }));
-                delete this.notesOn[note];
+                let duration = deltaTime - noteOnTime;
+                let channel = status & 0x0F;
+                try {
+                    this.track.addNote({
+                        midi: noteNumber,
+                        time: noteOnTime,
+                        duration: duration,
+                        velocity: velocity / 127,
+                        channel: channel,
+                    });
+                    console.log('Note added to track');
+                } catch (error) {
+                    console.log('Error adding note to track:', error);
+                }
+                delete this.notesOn[noteNumber];
             }
         }
     }
-
 }
 
 /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = (MidiRecorder);
@@ -9781,8 +9804,7 @@ class UI {
 	}
 
 	async saveRecording() {
-		let filename = await this.midiRecrder.saveRecording();
-		(0,_player_Player_js__WEBPACK_IMPORTED_MODULE_4__.getPlayer)().loadFromRecording(filename);
+		await this.midiRecrder.saveRecording();
 	}
 
 }
@@ -9854,6 +9876,1736 @@ class ZoomUI {
 	}
 }
 
+
+/***/ }),
+
+/***/ "./node_modules/@tonejs/midi/dist/BinarySearch.js":
+/*!********************************************************!*\
+  !*** ./node_modules/@tonejs/midi/dist/BinarySearch.js ***!
+  \********************************************************/
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.insert = exports.search = void 0;
+/**
+ * Return the index of the element at or before the given property
+ * @hidden
+ */
+function search(array, value, prop) {
+    if (prop === void 0) { prop = "ticks"; }
+    var beginning = 0;
+    var len = array.length;
+    var end = len;
+    if (len > 0 && array[len - 1][prop] <= value) {
+        return len - 1;
+    }
+    while (beginning < end) {
+        // calculate the midpoint for roughly equal partition
+        var midPoint = Math.floor(beginning + (end - beginning) / 2);
+        var event_1 = array[midPoint];
+        var nextEvent = array[midPoint + 1];
+        if (event_1[prop] === value) {
+            // choose the last one that has the same value
+            for (var i = midPoint; i < array.length; i++) {
+                var testEvent = array[i];
+                if (testEvent[prop] === value) {
+                    midPoint = i;
+                }
+            }
+            return midPoint;
+        }
+        else if (event_1[prop] < value && nextEvent[prop] > value) {
+            return midPoint;
+        }
+        else if (event_1[prop] > value) {
+            // search lower
+            end = midPoint;
+        }
+        else if (event_1[prop] < value) {
+            // search upper
+            beginning = midPoint + 1;
+        }
+    }
+    return -1;
+}
+exports.search = search;
+/**
+ * Does a binary search to insert the note
+ * in the correct spot in the array
+ * @hidden
+ */
+function insert(array, event, prop) {
+    if (prop === void 0) { prop = "ticks"; }
+    if (array.length) {
+        var index = search(array, event[prop], prop);
+        array.splice(index + 1, 0, event);
+    }
+    else {
+        array.push(event);
+    }
+}
+exports.insert = insert;
+//# sourceMappingURL=BinarySearch.js.map
+
+/***/ }),
+
+/***/ "./node_modules/@tonejs/midi/dist/ControlChange.js":
+/*!*********************************************************!*\
+  !*** ./node_modules/@tonejs/midi/dist/ControlChange.js ***!
+  \*********************************************************/
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.ControlChange = exports.controlChangeIds = exports.controlChangeNames = void 0;
+/**
+ * A map of values to control change names
+ * @hidden
+ */
+exports.controlChangeNames = {
+    1: "modulationWheel",
+    2: "breath",
+    4: "footController",
+    5: "portamentoTime",
+    7: "volume",
+    8: "balance",
+    10: "pan",
+    64: "sustain",
+    65: "portamentoTime",
+    66: "sostenuto",
+    67: "softPedal",
+    68: "legatoFootswitch",
+    84: "portamentoControl",
+};
+/**
+ * swap the keys and values
+ * @hidden
+ */
+exports.controlChangeIds = Object.keys(exports.controlChangeNames).reduce(function (obj, key) {
+    obj[exports.controlChangeNames[key]] = key;
+    return obj;
+}, {});
+var privateHeaderMap = new WeakMap();
+var privateCCNumberMap = new WeakMap();
+/**
+ * Represents a control change event
+ */
+var ControlChange = /** @class */ (function () {
+    /**
+     * @param event
+     * @param header
+     */
+    function ControlChange(event, header) {
+        privateHeaderMap.set(this, header);
+        privateCCNumberMap.set(this, event.controllerType);
+        this.ticks = event.absoluteTime;
+        this.value = event.value;
+    }
+    Object.defineProperty(ControlChange.prototype, "number", {
+        /**
+         * The controller number
+         */
+        get: function () {
+            return privateCCNumberMap.get(this);
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Object.defineProperty(ControlChange.prototype, "name", {
+        /**
+         * return the common name of the control number if it exists
+         */
+        get: function () {
+            if (exports.controlChangeNames[this.number]) {
+                return exports.controlChangeNames[this.number];
+            }
+            else {
+                return null;
+            }
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Object.defineProperty(ControlChange.prototype, "time", {
+        /**
+         * The time of the event in seconds
+         */
+        get: function () {
+            var header = privateHeaderMap.get(this);
+            return header.ticksToSeconds(this.ticks);
+        },
+        set: function (t) {
+            var header = privateHeaderMap.get(this);
+            this.ticks = header.secondsToTicks(t);
+        },
+        enumerable: false,
+        configurable: true
+    });
+    ControlChange.prototype.toJSON = function () {
+        return {
+            number: this.number,
+            ticks: this.ticks,
+            time: this.time,
+            value: this.value,
+        };
+    };
+    return ControlChange;
+}());
+exports.ControlChange = ControlChange;
+//# sourceMappingURL=ControlChange.js.map
+
+/***/ }),
+
+/***/ "./node_modules/@tonejs/midi/dist/ControlChanges.js":
+/*!**********************************************************!*\
+  !*** ./node_modules/@tonejs/midi/dist/ControlChanges.js ***!
+  \**********************************************************/
+/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.createControlChanges = void 0;
+var ControlChange_1 = __webpack_require__(/*! ./ControlChange */ "./node_modules/@tonejs/midi/dist/ControlChange.js");
+/**
+ * Automatically creates an alias for named control values using Proxies
+ * @hidden
+ */
+function createControlChanges() {
+    return new Proxy({}, {
+        // tslint:disable-next-line: typedef
+        get: function (target, handler) {
+            if (target[handler]) {
+                return target[handler];
+            }
+            else if (ControlChange_1.controlChangeIds.hasOwnProperty(handler)) {
+                return target[ControlChange_1.controlChangeIds[handler]];
+            }
+        },
+        // tslint:disable-next-line: typedef
+        set: function (target, handler, value) {
+            if (ControlChange_1.controlChangeIds.hasOwnProperty(handler)) {
+                target[ControlChange_1.controlChangeIds[handler]] = value;
+            }
+            else {
+                target[handler] = value;
+            }
+            return true;
+        },
+    });
+}
+exports.createControlChanges = createControlChanges;
+//# sourceMappingURL=ControlChanges.js.map
+
+/***/ }),
+
+/***/ "./node_modules/@tonejs/midi/dist/Encode.js":
+/*!**************************************************!*\
+  !*** ./node_modules/@tonejs/midi/dist/Encode.js ***!
+  \**************************************************/
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+var __spreadArray = (this && this.__spreadArray) || function (to, from, pack) {
+    if (pack || arguments.length === 2) for (var i = 0, l = from.length, ar; i < l; i++) {
+        if (ar || !(i in from)) {
+            if (!ar) ar = Array.prototype.slice.call(from, 0, i);
+            ar[i] = from[i];
+        }
+    }
+    return to.concat(ar || Array.prototype.slice.call(from));
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.encode = void 0;
+var midi_file_1 = __webpack_require__(/*! midi-file */ "./node_modules/midi-file/index.js");
+var Header_1 = __webpack_require__(/*! ./Header */ "./node_modules/@tonejs/midi/dist/Header.js");
+var array_flatten_1 = __webpack_require__(/*! array-flatten */ "./node_modules/array-flatten/dist.es2015/index.js");
+function encodeNote(note, channel) {
+    return [{
+            absoluteTime: note.ticks,
+            channel: channel,
+            deltaTime: 0,
+            noteNumber: note.midi,
+            type: "noteOn",
+            velocity: Math.floor(note.velocity * 127),
+        },
+        {
+            absoluteTime: note.ticks + note.durationTicks,
+            channel: channel,
+            deltaTime: 0,
+            noteNumber: note.midi,
+            type: "noteOff",
+            velocity: Math.floor(note.noteOffVelocity * 127),
+        }];
+}
+function encodeNotes(track) {
+    return (0, array_flatten_1.flatten)(track.notes.map(function (note) { return encodeNote(note, track.channel); }));
+}
+function encodeControlChange(cc, channel) {
+    return {
+        absoluteTime: cc.ticks,
+        channel: channel,
+        controllerType: cc.number,
+        deltaTime: 0,
+        type: "controller",
+        value: Math.floor(cc.value * 127),
+    };
+}
+function encodeControlChanges(track) {
+    var controlChanges = [];
+    for (var i = 0; i < 127; i++) {
+        if (track.controlChanges.hasOwnProperty(i)) {
+            track.controlChanges[i].forEach(function (cc) {
+                controlChanges.push(encodeControlChange(cc, track.channel));
+            });
+        }
+    }
+    return controlChanges;
+}
+function encodePitchBend(pb, channel) {
+    return {
+        absoluteTime: pb.ticks,
+        channel: channel,
+        deltaTime: 0,
+        type: "pitchBend",
+        value: pb.value,
+    };
+}
+function encodePitchBends(track) {
+    var pitchBends = [];
+    track.pitchBends.forEach(function (pb) {
+        pitchBends.push(encodePitchBend(pb, track.channel));
+    });
+    return pitchBends;
+}
+function encodeInstrument(track) {
+    return {
+        absoluteTime: 0,
+        channel: track.channel,
+        deltaTime: 0,
+        programNumber: track.instrument.number,
+        type: "programChange",
+    };
+}
+function encodeTrackName(name) {
+    return {
+        absoluteTime: 0,
+        deltaTime: 0,
+        meta: true,
+        text: name,
+        type: "trackName",
+    };
+}
+function encodeTempo(tempo) {
+    return {
+        absoluteTime: tempo.ticks,
+        deltaTime: 0,
+        meta: true,
+        microsecondsPerBeat: Math.floor(60000000 / tempo.bpm),
+        type: "setTempo",
+    };
+}
+function encodeTimeSignature(timeSig) {
+    return {
+        absoluteTime: timeSig.ticks,
+        deltaTime: 0,
+        denominator: timeSig.timeSignature[1],
+        meta: true,
+        metronome: 24,
+        numerator: timeSig.timeSignature[0],
+        thirtyseconds: 8,
+        type: "timeSignature",
+    };
+}
+// function encodeMeta(event: )
+function encodeKeySignature(keySig) {
+    var keyIndex = Header_1.keySignatureKeys.indexOf(keySig.key);
+    return {
+        absoluteTime: keySig.ticks,
+        deltaTime: 0,
+        key: keyIndex + 7,
+        meta: true,
+        scale: keySig.scale === "major" ? 0 : 1,
+        type: "keySignature",
+    };
+}
+function encodeText(textEvent) {
+    return {
+        absoluteTime: textEvent.ticks,
+        deltaTime: 0,
+        meta: true,
+        text: textEvent.text,
+        type: textEvent.type,
+    };
+}
+/**
+ * Convert the MIDI object to an array.
+ */
+function encode(midi) {
+    var midiData = {
+        header: {
+            format: 1,
+            numTracks: midi.tracks.length + 1,
+            ticksPerBeat: midi.header.ppq,
+        },
+        tracks: __spreadArray([
+            __spreadArray(__spreadArray(__spreadArray(__spreadArray([
+                // The name data.
+                {
+                    absoluteTime: 0,
+                    deltaTime: 0,
+                    meta: true,
+                    text: midi.header.name,
+                    type: "trackName",
+                }
+            ], midi.header.keySignatures.map(function (keySig) { return encodeKeySignature(keySig); }), true), midi.header.meta.map(function (e) { return encodeText(e); }), true), midi.header.tempos.map(function (tempo) { return encodeTempo(tempo); }), true), midi.header.timeSignatures.map(function (timeSig) { return encodeTimeSignature(timeSig); }), true)
+        ], midi.tracks.map(function (track) {
+            return __spreadArray(__spreadArray(__spreadArray([
+                // Add the name
+                encodeTrackName(track.name),
+                // the instrument
+                encodeInstrument(track)
+            ], encodeNotes(track), true), encodeControlChanges(track), true), encodePitchBends(track), true);
+        }), true),
+    };
+    // Sort and set `deltaTime` of all of the tracks.
+    midiData.tracks = midiData.tracks.map(function (track) {
+        track = track.sort(function (a, b) { return a.absoluteTime - b.absoluteTime; });
+        var lastTime = 0;
+        track.forEach(function (note) {
+            note.deltaTime = note.absoluteTime - lastTime;
+            lastTime = note.absoluteTime;
+            delete note.absoluteTime;
+        });
+        // End of track.
+        track.push({
+            deltaTime: 0,
+            meta: true,
+            type: "endOfTrack",
+        });
+        return track;
+    });
+    // Rreturn `midiData`.
+    return new Uint8Array((0, midi_file_1.writeMidi)(midiData));
+}
+exports.encode = encode;
+//# sourceMappingURL=Encode.js.map
+
+/***/ }),
+
+/***/ "./node_modules/@tonejs/midi/dist/Header.js":
+/*!**************************************************!*\
+  !*** ./node_modules/@tonejs/midi/dist/Header.js ***!
+  \**************************************************/
+/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Header = exports.keySignatureKeys = void 0;
+var BinarySearch_1 = __webpack_require__(/*! ./BinarySearch */ "./node_modules/@tonejs/midi/dist/BinarySearch.js");
+var privatePPQMap = new WeakMap();
+/**
+ * @hidden
+ */
+exports.keySignatureKeys = [
+    "Cb",
+    "Gb",
+    "Db",
+    "Ab",
+    "Eb",
+    "Bb",
+    "F",
+    "C",
+    "G",
+    "D",
+    "A",
+    "E",
+    "B",
+    "F#",
+    "C#",
+];
+/**
+ * The parsed MIDI file header.
+ */
+var Header = /** @class */ (function () {
+    function Header(midiData) {
+        var _this = this;
+        /**
+         * The array of all the tempo events.
+         */
+        this.tempos = [];
+        /**
+         * The time signatures.
+         */
+        this.timeSignatures = [];
+        /**
+         * The time signatures.
+         */
+        this.keySignatures = [];
+        /**
+         * Additional meta events.
+         */
+        this.meta = [];
+        /**
+         * The name of the MIDI file;
+         */
+        this.name = "";
+        // Look through all the tracks for tempo changes.
+        privatePPQMap.set(this, 480);
+        if (midiData) {
+            privatePPQMap.set(this, midiData.header.ticksPerBeat);
+            // Check time signature and tempo events from all of the tracks.
+            midiData.tracks.forEach(function (track) {
+                track.forEach(function (event) {
+                    if (event.meta) {
+                        if (event.type === "timeSignature") {
+                            _this.timeSignatures.push({
+                                ticks: event.absoluteTime,
+                                timeSignature: [
+                                    event.numerator,
+                                    event.denominator,
+                                ],
+                            });
+                        }
+                        else if (event.type === "setTempo") {
+                            _this.tempos.push({
+                                bpm: 60000000 / event.microsecondsPerBeat,
+                                ticks: event.absoluteTime,
+                            });
+                        }
+                        else if (event.type === "keySignature") {
+                            _this.keySignatures.push({
+                                key: exports.keySignatureKeys[event.key + 7],
+                                scale: event.scale === 0 ? "major" : "minor",
+                                ticks: event.absoluteTime,
+                            });
+                        }
+                    }
+                });
+            });
+            // Check the first track for other relevant data.
+            var firstTrackCurrentTicks_1 = 0; // Used for absolute times.
+            midiData.tracks[0].forEach(function (event) {
+                firstTrackCurrentTicks_1 += event.deltaTime;
+                if (event.meta) {
+                    if (event.type === "trackName") {
+                        _this.name = event.text;
+                    }
+                    else if (event.type === "text" ||
+                        event.type === "cuePoint" ||
+                        event.type === "marker" ||
+                        event.type === "lyrics") {
+                        _this.meta.push({
+                            text: event.text,
+                            ticks: firstTrackCurrentTicks_1,
+                            type: event.type,
+                        });
+                    }
+                }
+            });
+            this.update();
+        }
+    }
+    /**
+     * This must be invoked after any changes are made to the tempo array
+     * or the timeSignature array for the updated values to be reflected.
+     */
+    Header.prototype.update = function () {
+        var _this = this;
+        var currentTime = 0;
+        var lastEventBeats = 0;
+        // Make sure it's sorted;
+        this.tempos.sort(function (a, b) { return a.ticks - b.ticks; });
+        this.tempos.forEach(function (event, index) {
+            var lastBPM = index > 0 ? _this.tempos[index - 1].bpm : _this.tempos[0].bpm;
+            var beats = event.ticks / _this.ppq - lastEventBeats;
+            var elapsedSeconds = (60 / lastBPM) * beats;
+            event.time = elapsedSeconds + currentTime;
+            currentTime = event.time;
+            lastEventBeats += beats;
+        });
+        this.timeSignatures.sort(function (a, b) { return a.ticks - b.ticks; });
+        this.timeSignatures.forEach(function (event, index) {
+            var lastEvent = index > 0
+                ? _this.timeSignatures[index - 1]
+                : _this.timeSignatures[0];
+            var elapsedBeats = (event.ticks - lastEvent.ticks) / _this.ppq;
+            var elapsedMeasures = elapsedBeats /
+                lastEvent.timeSignature[0] /
+                (lastEvent.timeSignature[1] / 4);
+            lastEvent.measures = lastEvent.measures || 0;
+            event.measures = elapsedMeasures + lastEvent.measures;
+        });
+    };
+    /**
+     * Convert ticks into seconds based on the tempo changes.
+     */
+    Header.prototype.ticksToSeconds = function (ticks) {
+        // Find the relevant position.
+        var index = (0, BinarySearch_1.search)(this.tempos, ticks);
+        if (index !== -1) {
+            var tempo = this.tempos[index];
+            var tempoTime = tempo.time;
+            var elapsedBeats = (ticks - tempo.ticks) / this.ppq;
+            return tempoTime + (60 / tempo.bpm) * elapsedBeats;
+        }
+        else {
+            // Assume 120.
+            var beats = ticks / this.ppq;
+            return (60 / 120) * beats;
+        }
+    };
+    /**
+     * Convert ticks into measures based off of the time signatures.
+     */
+    Header.prototype.ticksToMeasures = function (ticks) {
+        var index = (0, BinarySearch_1.search)(this.timeSignatures, ticks);
+        if (index !== -1) {
+            var timeSigEvent = this.timeSignatures[index];
+            var elapsedBeats = (ticks - timeSigEvent.ticks) / this.ppq;
+            return (timeSigEvent.measures +
+                elapsedBeats /
+                    (timeSigEvent.timeSignature[0] /
+                        timeSigEvent.timeSignature[1]) /
+                    4);
+        }
+        else {
+            return ticks / this.ppq / 4;
+        }
+    };
+    Object.defineProperty(Header.prototype, "ppq", {
+        /**
+         * The number of ticks per quarter note.
+         */
+        get: function () {
+            return privatePPQMap.get(this);
+        },
+        enumerable: false,
+        configurable: true
+    });
+    /**
+     * Convert seconds to ticks based on the tempo events.
+     */
+    Header.prototype.secondsToTicks = function (seconds) {
+        // Find the relevant position.
+        var index = (0, BinarySearch_1.search)(this.tempos, seconds, "time");
+        if (index !== -1) {
+            var tempo = this.tempos[index];
+            var tempoTime = tempo.time;
+            var elapsedTime = seconds - tempoTime;
+            var elapsedBeats = elapsedTime / (60 / tempo.bpm);
+            return Math.round(tempo.ticks + elapsedBeats * this.ppq);
+        }
+        else {
+            // Assume 120.
+            var beats = seconds / (60 / 120);
+            return Math.round(beats * this.ppq);
+        }
+    };
+    /**
+     * Convert the header into an object.
+     */
+    Header.prototype.toJSON = function () {
+        return {
+            keySignatures: this.keySignatures,
+            meta: this.meta,
+            name: this.name,
+            ppq: this.ppq,
+            tempos: this.tempos.map(function (t) {
+                return {
+                    bpm: t.bpm,
+                    ticks: t.ticks,
+                };
+            }),
+            timeSignatures: this.timeSignatures,
+        };
+    };
+    /**
+     * Parse a header json object.
+     */
+    Header.prototype.fromJSON = function (json) {
+        this.name = json.name;
+        // Clone all the attributes.
+        this.tempos = json.tempos.map(function (t) { return Object.assign({}, t); });
+        this.timeSignatures = json.timeSignatures.map(function (t) {
+            return Object.assign({}, t);
+        });
+        this.keySignatures = json.keySignatures.map(function (t) {
+            return Object.assign({}, t);
+        });
+        this.meta = json.meta.map(function (t) { return Object.assign({}, t); });
+        privatePPQMap.set(this, json.ppq);
+        this.update();
+    };
+    /**
+     * Update the tempo of the midi to a single tempo. Will remove and replace
+     * any other tempos currently set and update all of the event timing.
+     * @param bpm The tempo in beats per second.
+     */
+    Header.prototype.setTempo = function (bpm) {
+        this.tempos = [
+            {
+                bpm: bpm,
+                ticks: 0,
+            },
+        ];
+        this.update();
+    };
+    return Header;
+}());
+exports.Header = Header;
+//# sourceMappingURL=Header.js.map
+
+/***/ }),
+
+/***/ "./node_modules/@tonejs/midi/dist/Instrument.js":
+/*!******************************************************!*\
+  !*** ./node_modules/@tonejs/midi/dist/Instrument.js ***!
+  \******************************************************/
+/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Instrument = void 0;
+var InstrumentMaps_1 = __webpack_require__(/*! ./InstrumentMaps */ "./node_modules/@tonejs/midi/dist/InstrumentMaps.js");
+/**
+ * @hidden
+ */
+var privateTrackMap = new WeakMap();
+/**
+ * Describes the MIDI instrument of a track.
+ */
+var Instrument = /** @class */ (function () {
+    /**
+     * @param trackData
+     * @param track
+     */
+    function Instrument(trackData, track) {
+        /**
+         * The instrument number. Defaults to 0.
+         */
+        this.number = 0;
+        privateTrackMap.set(this, track);
+        this.number = 0;
+        if (trackData) {
+            var programChange = trackData.find(function (e) { return e.type === "programChange"; });
+            // Set 'number' from 'programNumber' if exists.
+            if (programChange) {
+                this.number = programChange.programNumber;
+            }
+        }
+    }
+    Object.defineProperty(Instrument.prototype, "name", {
+        /**
+         * The common name of the instrument.
+         */
+        get: function () {
+            if (this.percussion) {
+                return InstrumentMaps_1.DrumKitByPatchID[this.number];
+            }
+            else {
+                return InstrumentMaps_1.instrumentByPatchID[this.number];
+            }
+        },
+        set: function (n) {
+            var patchNumber = InstrumentMaps_1.instrumentByPatchID.indexOf(n);
+            if (patchNumber !== -1) {
+                this.number = patchNumber;
+            }
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Object.defineProperty(Instrument.prototype, "family", {
+        /**
+         * The instrument family, e.g. "piano".
+         */
+        get: function () {
+            if (this.percussion) {
+                return "drums";
+            }
+            else {
+                return InstrumentMaps_1.InstrumentFamilyByID[Math.floor(this.number / 8)];
+            }
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Object.defineProperty(Instrument.prototype, "percussion", {
+        /**
+         * If the instrument is a percussion instrument.
+         */
+        get: function () {
+            var track = privateTrackMap.get(this);
+            return track.channel === 9;
+        },
+        enumerable: false,
+        configurable: true
+    });
+    /**
+     * Convert it to JSON form.
+     */
+    Instrument.prototype.toJSON = function () {
+        return {
+            family: this.family,
+            number: this.number,
+            name: this.name
+        };
+    };
+    /**
+     * Convert from JSON form.
+     */
+    Instrument.prototype.fromJSON = function (json) {
+        this.number = json.number;
+    };
+    return Instrument;
+}());
+exports.Instrument = Instrument;
+//# sourceMappingURL=Instrument.js.map
+
+/***/ }),
+
+/***/ "./node_modules/@tonejs/midi/dist/InstrumentMaps.js":
+/*!**********************************************************!*\
+  !*** ./node_modules/@tonejs/midi/dist/InstrumentMaps.js ***!
+  \**********************************************************/
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.DrumKitByPatchID = exports.InstrumentFamilyByID = exports.instrumentByPatchID = void 0;
+exports.instrumentByPatchID = [
+    "acoustic grand piano",
+    "bright acoustic piano",
+    "electric grand piano",
+    "honky-tonk piano",
+    "electric piano 1",
+    "electric piano 2",
+    "harpsichord",
+    "clavi",
+    "celesta",
+    "glockenspiel",
+    "music box",
+    "vibraphone",
+    "marimba",
+    "xylophone",
+    "tubular bells",
+    "dulcimer",
+    "drawbar organ",
+    "percussive organ",
+    "rock organ",
+    "church organ",
+    "reed organ",
+    "accordion",
+    "harmonica",
+    "tango accordion",
+    "acoustic guitar (nylon)",
+    "acoustic guitar (steel)",
+    "electric guitar (jazz)",
+    "electric guitar (clean)",
+    "electric guitar (muted)",
+    "overdriven guitar",
+    "distortion guitar",
+    "guitar harmonics",
+    "acoustic bass",
+    "electric bass (finger)",
+    "electric bass (pick)",
+    "fretless bass",
+    "slap bass 1",
+    "slap bass 2",
+    "synth bass 1",
+    "synth bass 2",
+    "violin",
+    "viola",
+    "cello",
+    "contrabass",
+    "tremolo strings",
+    "pizzicato strings",
+    "orchestral harp",
+    "timpani",
+    "string ensemble 1",
+    "string ensemble 2",
+    "synthstrings 1",
+    "synthstrings 2",
+    "choir aahs",
+    "voice oohs",
+    "synth voice",
+    "orchestra hit",
+    "trumpet",
+    "trombone",
+    "tuba",
+    "muted trumpet",
+    "french horn",
+    "brass section",
+    "synthbrass 1",
+    "synthbrass 2",
+    "soprano sax",
+    "alto sax",
+    "tenor sax",
+    "baritone sax",
+    "oboe",
+    "english horn",
+    "bassoon",
+    "clarinet",
+    "piccolo",
+    "flute",
+    "recorder",
+    "pan flute",
+    "blown bottle",
+    "shakuhachi",
+    "whistle",
+    "ocarina",
+    "lead 1 (square)",
+    "lead 2 (sawtooth)",
+    "lead 3 (calliope)",
+    "lead 4 (chiff)",
+    "lead 5 (charang)",
+    "lead 6 (voice)",
+    "lead 7 (fifths)",
+    "lead 8 (bass + lead)",
+    "pad 1 (new age)",
+    "pad 2 (warm)",
+    "pad 3 (polysynth)",
+    "pad 4 (choir)",
+    "pad 5 (bowed)",
+    "pad 6 (metallic)",
+    "pad 7 (halo)",
+    "pad 8 (sweep)",
+    "fx 1 (rain)",
+    "fx 2 (soundtrack)",
+    "fx 3 (crystal)",
+    "fx 4 (atmosphere)",
+    "fx 5 (brightness)",
+    "fx 6 (goblins)",
+    "fx 7 (echoes)",
+    "fx 8 (sci-fi)",
+    "sitar",
+    "banjo",
+    "shamisen",
+    "koto",
+    "kalimba",
+    "bag pipe",
+    "fiddle",
+    "shanai",
+    "tinkle bell",
+    "agogo",
+    "steel drums",
+    "woodblock",
+    "taiko drum",
+    "melodic tom",
+    "synth drum",
+    "reverse cymbal",
+    "guitar fret noise",
+    "breath noise",
+    "seashore",
+    "bird tweet",
+    "telephone ring",
+    "helicopter",
+    "applause",
+    "gunshot",
+];
+exports.InstrumentFamilyByID = [
+    "piano",
+    "chromatic percussion",
+    "organ",
+    "guitar",
+    "bass",
+    "strings",
+    "ensemble",
+    "brass",
+    "reed",
+    "pipe",
+    "synth lead",
+    "synth pad",
+    "synth effects",
+    "world",
+    "percussive",
+    "sound effects",
+];
+exports.DrumKitByPatchID = {
+    0: "standard kit",
+    8: "room kit",
+    16: "power kit",
+    24: "electronic kit",
+    25: "tr-808 kit",
+    32: "jazz kit",
+    40: "brush kit",
+    48: "orchestra kit",
+    56: "sound fx kit",
+};
+//# sourceMappingURL=InstrumentMaps.js.map
+
+/***/ }),
+
+/***/ "./node_modules/@tonejs/midi/dist/Midi.js":
+/*!************************************************!*\
+  !*** ./node_modules/@tonejs/midi/dist/Midi.js ***!
+  \************************************************/
+/***/ (function(__unused_webpack_module, exports, __webpack_require__) {
+
+"use strict";
+
+var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
+    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
+    return new (P || (P = Promise))(function (resolve, reject) {
+        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
+        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
+        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
+        step((generator = generator.apply(thisArg, _arguments || [])).next());
+    });
+};
+var __generator = (this && this.__generator) || function (thisArg, body) {
+    var _ = { label: 0, sent: function() { if (t[0] & 1) throw t[1]; return t[1]; }, trys: [], ops: [] }, f, y, t, g;
+    return g = { next: verb(0), "throw": verb(1), "return": verb(2) }, typeof Symbol === "function" && (g[Symbol.iterator] = function() { return this; }), g;
+    function verb(n) { return function (v) { return step([n, v]); }; }
+    function step(op) {
+        if (f) throw new TypeError("Generator is already executing.");
+        while (_) try {
+            if (f = 1, y && (t = op[0] & 2 ? y["return"] : op[0] ? y["throw"] || ((t = y["return"]) && t.call(y), 0) : y.next) && !(t = t.call(y, op[1])).done) return t;
+            if (y = 0, t) op = [op[0] & 2, t.value];
+            switch (op[0]) {
+                case 0: case 1: t = op; break;
+                case 4: _.label++; return { value: op[1], done: false };
+                case 5: _.label++; y = op[1]; op = [0]; continue;
+                case 7: op = _.ops.pop(); _.trys.pop(); continue;
+                default:
+                    if (!(t = _.trys, t = t.length > 0 && t[t.length - 1]) && (op[0] === 6 || op[0] === 2)) { _ = 0; continue; }
+                    if (op[0] === 3 && (!t || (op[1] > t[0] && op[1] < t[3]))) { _.label = op[1]; break; }
+                    if (op[0] === 6 && _.label < t[1]) { _.label = t[1]; t = op; break; }
+                    if (t && _.label < t[2]) { _.label = t[2]; _.ops.push(op); break; }
+                    if (t[2]) _.ops.pop();
+                    _.trys.pop(); continue;
+            }
+            op = body.call(thisArg, _);
+        } catch (e) { op = [6, e]; y = 0; } finally { f = t = 0; }
+        if (op[0] & 5) throw op[1]; return { value: op[0] ? op[1] : void 0, done: true };
+    }
+};
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Header = exports.Track = exports.Midi = void 0;
+var midi_file_1 = __webpack_require__(/*! midi-file */ "./node_modules/midi-file/index.js");
+var Header_1 = __webpack_require__(/*! ./Header */ "./node_modules/@tonejs/midi/dist/Header.js");
+var Track_1 = __webpack_require__(/*! ./Track */ "./node_modules/@tonejs/midi/dist/Track.js");
+var Encode_1 = __webpack_require__(/*! ./Encode */ "./node_modules/@tonejs/midi/dist/Encode.js");
+/**
+ * The main midi parsing class.
+ */
+var Midi = /** @class */ (function () {
+    /**
+     * Parse the midi data
+     */
+    function Midi(midiArray) {
+        var _this = this;
+        // Parse the MIDI data if there is any.
+        var midiData = null;
+        if (midiArray) {
+            // Transform midiArray to ArrayLike<number>
+            // only if it's an ArrayBuffer.
+            var midiArrayLike = midiArray instanceof ArrayBuffer
+                ? new Uint8Array(midiArray)
+                : midiArray;
+            // Parse MIDI data.
+            midiData = (0, midi_file_1.parseMidi)(midiArrayLike);
+            // Add the absolute times to each of the tracks.
+            midiData.tracks.forEach(function (track) {
+                var currentTicks = 0;
+                track.forEach(function (event) {
+                    currentTicks += event.deltaTime;
+                    event.absoluteTime = currentTicks;
+                });
+            });
+            // Ensure at most one instrument per track.
+            midiData.tracks = splitTracks(midiData.tracks);
+        }
+        this.header = new Header_1.Header(midiData);
+        this.tracks = [];
+        // Parse MIDI data.
+        if (midiArray) {
+            // Format 0, everything is on the same track.
+            this.tracks = midiData.tracks.map(function (trackData) { return new Track_1.Track(trackData, _this.header); });
+            // If it's format 1 and there are no notes on the first track, remove it.
+            if (midiData.header.format === 1 && this.tracks[0].duration === 0) {
+                this.tracks.shift();
+            }
+        }
+    }
+    /**
+     * Download and parse the MIDI file. Returns a promise
+     * which resolves to the generated MIDI file.
+     * @param url The URL to fetch.
+     */
+    Midi.fromUrl = function (url) {
+        return __awaiter(this, void 0, void 0, function () {
+            var response, arrayBuffer;
+            return __generator(this, function (_a) {
+                switch (_a.label) {
+                    case 0: return [4 /*yield*/, fetch(url)];
+                    case 1:
+                        response = _a.sent();
+                        if (!response.ok) return [3 /*break*/, 3];
+                        return [4 /*yield*/, response.arrayBuffer()];
+                    case 2:
+                        arrayBuffer = _a.sent();
+                        return [2 /*return*/, new Midi(arrayBuffer)];
+                    case 3: throw new Error("Could not load '".concat(url, "'"));
+                }
+            });
+        });
+    };
+    Object.defineProperty(Midi.prototype, "name", {
+        /**
+         * The name of the midi file, taken from the first track.
+         */
+        get: function () {
+            return this.header.name;
+        },
+        set: function (n) {
+            this.header.name = n;
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Object.defineProperty(Midi.prototype, "duration", {
+        /**
+         * The total length of the file in seconds.
+         */
+        get: function () {
+            // Get the max of the last note of all the tracks.
+            var durations = this.tracks.map(function (t) { return t.duration; });
+            return Math.max.apply(Math, durations);
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Object.defineProperty(Midi.prototype, "durationTicks", {
+        /**
+         * The total length of the file in ticks.
+         */
+        get: function () {
+            // Get the max of the last note of all the tracks.
+            var durationTicks = this.tracks.map(function (t) { return t.durationTicks; });
+            return Math.max.apply(Math, durationTicks);
+        },
+        enumerable: false,
+        configurable: true
+    });
+    /**
+     * Add a track to the MIDI file.
+     */
+    Midi.prototype.addTrack = function () {
+        var track = new Track_1.Track(undefined, this.header);
+        this.tracks.push(track);
+        return track;
+    };
+    /**
+     * Encode the MIDI as a Uint8Array.
+     */
+    Midi.prototype.toArray = function () {
+        return (0, Encode_1.encode)(this);
+    };
+    /**
+     * Convert the MIDI object to JSON.
+     */
+    Midi.prototype.toJSON = function () {
+        return {
+            header: this.header.toJSON(),
+            tracks: this.tracks.map(function (track) { return track.toJSON(); }),
+        };
+    };
+    /**
+     * Parse a JSON representation of the object. Will overwrite the current
+     * tracks and header.
+     */
+    Midi.prototype.fromJSON = function (json) {
+        var _this = this;
+        this.header = new Header_1.Header();
+        this.header.fromJSON(json.header);
+        this.tracks = json.tracks.map(function (trackJSON) {
+            var track = new Track_1.Track(undefined, _this.header);
+            track.fromJSON(trackJSON);
+            return track;
+        });
+    };
+    /**
+     * Clone the entire object MIDI object.
+     */
+    Midi.prototype.clone = function () {
+        var midi = new Midi();
+        midi.fromJSON(this.toJSON());
+        return midi;
+    };
+    return Midi;
+}());
+exports.Midi = Midi;
+var Track_2 = __webpack_require__(/*! ./Track */ "./node_modules/@tonejs/midi/dist/Track.js");
+Object.defineProperty(exports, "Track", ({ enumerable: true, get: function () { return Track_2.Track; } }));
+var Header_2 = __webpack_require__(/*! ./Header */ "./node_modules/@tonejs/midi/dist/Header.js");
+Object.defineProperty(exports, "Header", ({ enumerable: true, get: function () { return Header_2.Header; } }));
+/**
+ * Given a list of MIDI tracks, make sure that each channel corresponds to at
+ * most one channel and at most one instrument. This means splitting up tracks
+ * that contain more than one channel or instrument.
+ */
+function splitTracks(tracks) {
+    var newTracks = [];
+    for (var i = 0; i < tracks.length; i++) {
+        var defaultTrack = newTracks.length;
+        // a map from [program, channel] tuples to new track numbers
+        var trackMap = new Map();
+        // a map from channel numbers to current program numbers
+        var currentProgram = Array(16).fill(0);
+        for (var _i = 0, _a = tracks[i]; _i < _a.length; _i++) {
+            var event_1 = _a[_i];
+            var targetTrack = defaultTrack;
+            // If the event has a channel, we need to find that channel's current
+            // program number and the appropriate track for this [program, channel]
+            // pair.
+            var channel = event_1.channel;
+            if (channel !== undefined) {
+                if (event_1.type === "programChange") {
+                    currentProgram[channel] = event_1.programNumber;
+                }
+                var program = currentProgram[channel];
+                var trackKey = "".concat(program, " ").concat(channel);
+                if (trackMap.has(trackKey)) {
+                    targetTrack = trackMap.get(trackKey);
+                }
+                else {
+                    targetTrack = defaultTrack + trackMap.size;
+                    trackMap.set(trackKey, targetTrack);
+                }
+            }
+            if (!newTracks[targetTrack]) {
+                newTracks.push([]);
+            }
+            newTracks[targetTrack].push(event_1);
+        }
+    }
+    return newTracks;
+}
+//# sourceMappingURL=Midi.js.map
+
+/***/ }),
+
+/***/ "./node_modules/@tonejs/midi/dist/Note.js":
+/*!************************************************!*\
+  !*** ./node_modules/@tonejs/midi/dist/Note.js ***!
+  \************************************************/
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Note = void 0;
+/**
+ * Convert a MIDI note into a pitch.
+ */
+function midiToPitch(midi) {
+    var octave = Math.floor(midi / 12) - 1;
+    return midiToPitchClass(midi) + octave.toString();
+}
+/**
+ * Convert a MIDI note to a pitch class (just the pitch no octave).
+ */
+function midiToPitchClass(midi) {
+    var scaleIndexToNote = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    var note = midi % 12;
+    return scaleIndexToNote[note];
+}
+/**
+ * Convert a pitch class to a MIDI note.
+ */
+function pitchClassToMidi(pitch) {
+    var scaleIndexToNote = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+    return scaleIndexToNote.indexOf(pitch);
+}
+/**
+ * Convert a pitch to a MIDI number.
+ */
+// tslint:disable-next-line: only-arrow-functions typedef
+var pitchToMidi = (function () {
+    var regexp = /^([a-g]{1}(?:b|#|x|bb)?)(-?[0-9]+)/i;
+    var noteToScaleIndex = {
+        // tslint:disable-next-line: object-literal-sort-keys
+        cbb: -2, cb: -1, c: 0, "c#": 1, cx: 2,
+        dbb: 0, db: 1, d: 2, "d#": 3, dx: 4,
+        ebb: 2, eb: 3, e: 4, "e#": 5, ex: 6,
+        fbb: 3, fb: 4, f: 5, "f#": 6, fx: 7,
+        gbb: 5, gb: 6, g: 7, "g#": 8, gx: 9,
+        abb: 7, ab: 8, a: 9, "a#": 10, ax: 11,
+        bbb: 9, bb: 10, b: 11, "b#": 12, bx: 13,
+    };
+    return function (note) {
+        var split = regexp.exec(note);
+        var pitch = split[1];
+        var octave = split[2];
+        var index = noteToScaleIndex[pitch.toLowerCase()];
+        return index + (parseInt(octave, 10) + 1) * 12;
+    };
+}());
+var privateHeaderMap = new WeakMap();
+/**
+ * A Note consists of a `noteOn` and `noteOff` event.
+ */
+var Note = /** @class */ (function () {
+    function Note(noteOn, noteOff, header) {
+        privateHeaderMap.set(this, header);
+        this.midi = noteOn.midi;
+        this.velocity = noteOn.velocity;
+        this.noteOffVelocity = noteOff.velocity;
+        this.ticks = noteOn.ticks;
+        this.durationTicks = noteOff.ticks - noteOn.ticks;
+    }
+    Object.defineProperty(Note.prototype, "name", {
+        /**
+         * The note name and octave in scientific pitch notation, e.g. "C4".
+         */
+        get: function () {
+            return midiToPitch(this.midi);
+        },
+        set: function (n) {
+            this.midi = pitchToMidi(n);
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Object.defineProperty(Note.prototype, "octave", {
+        /**
+         * The notes octave number.
+         */
+        get: function () {
+            return Math.floor(this.midi / 12) - 1;
+        },
+        set: function (o) {
+            var diff = o - this.octave;
+            this.midi += diff * 12;
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Object.defineProperty(Note.prototype, "pitch", {
+        /**
+         * The pitch class name. e.g. "A".
+         */
+        get: function () {
+            return midiToPitchClass(this.midi);
+        },
+        set: function (p) {
+            this.midi = 12 * (this.octave + 1) + pitchClassToMidi(p);
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Object.defineProperty(Note.prototype, "duration", {
+        /**
+         * The duration of the segment in seconds.
+         */
+        get: function () {
+            var header = privateHeaderMap.get(this);
+            return header.ticksToSeconds(this.ticks + this.durationTicks) - header.ticksToSeconds(this.ticks);
+        },
+        set: function (d) {
+            var header = privateHeaderMap.get(this);
+            var noteEndTicks = header.secondsToTicks(this.time + d);
+            this.durationTicks = noteEndTicks - this.ticks;
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Object.defineProperty(Note.prototype, "time", {
+        /**
+         * The time of the event in seconds.
+         */
+        get: function () {
+            var header = privateHeaderMap.get(this);
+            return header.ticksToSeconds(this.ticks);
+        },
+        set: function (t) {
+            var header = privateHeaderMap.get(this);
+            this.ticks = header.secondsToTicks(t);
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Object.defineProperty(Note.prototype, "bars", {
+        /**
+         * The number of measures (and partial measures) to this beat.
+         * Takes into account time signature changes.
+         * @readonly
+         */
+        get: function () {
+            var header = privateHeaderMap.get(this);
+            return header.ticksToMeasures(this.ticks);
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Note.prototype.toJSON = function () {
+        return {
+            duration: this.duration,
+            durationTicks: this.durationTicks,
+            midi: this.midi,
+            name: this.name,
+            ticks: this.ticks,
+            time: this.time,
+            velocity: this.velocity,
+        };
+    };
+    return Note;
+}());
+exports.Note = Note;
+//# sourceMappingURL=Note.js.map
+
+/***/ }),
+
+/***/ "./node_modules/@tonejs/midi/dist/PitchBend.js":
+/*!*****************************************************!*\
+  !*** ./node_modules/@tonejs/midi/dist/PitchBend.js ***!
+  \*****************************************************/
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.PitchBend = void 0;
+var privateHeaderMap = new WeakMap();
+/**
+ * Represents a pitch bend event.
+ */
+var PitchBend = /** @class */ (function () {
+    /**
+     * @param event
+     * @param header
+     */
+    function PitchBend(event, header) {
+        privateHeaderMap.set(this, header);
+        this.ticks = event.absoluteTime;
+        this.value = event.value;
+    }
+    Object.defineProperty(PitchBend.prototype, "time", {
+        /**
+         * The time of the event in seconds
+         */
+        get: function () {
+            var header = privateHeaderMap.get(this);
+            return header.ticksToSeconds(this.ticks);
+        },
+        set: function (t) {
+            var header = privateHeaderMap.get(this);
+            this.ticks = header.secondsToTicks(t);
+        },
+        enumerable: false,
+        configurable: true
+    });
+    PitchBend.prototype.toJSON = function () {
+        return {
+            ticks: this.ticks,
+            time: this.time,
+            value: this.value,
+        };
+    };
+    return PitchBend;
+}());
+exports.PitchBend = PitchBend;
+//# sourceMappingURL=PitchBend.js.map
+
+/***/ }),
+
+/***/ "./node_modules/@tonejs/midi/dist/Track.js":
+/*!*************************************************!*\
+  !*** ./node_modules/@tonejs/midi/dist/Track.js ***!
+  \*************************************************/
+/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.Track = void 0;
+var BinarySearch_1 = __webpack_require__(/*! ./BinarySearch */ "./node_modules/@tonejs/midi/dist/BinarySearch.js");
+var ControlChange_1 = __webpack_require__(/*! ./ControlChange */ "./node_modules/@tonejs/midi/dist/ControlChange.js");
+var ControlChanges_1 = __webpack_require__(/*! ./ControlChanges */ "./node_modules/@tonejs/midi/dist/ControlChanges.js");
+var PitchBend_1 = __webpack_require__(/*! ./PitchBend */ "./node_modules/@tonejs/midi/dist/PitchBend.js");
+var Instrument_1 = __webpack_require__(/*! ./Instrument */ "./node_modules/@tonejs/midi/dist/Instrument.js");
+var Note_1 = __webpack_require__(/*! ./Note */ "./node_modules/@tonejs/midi/dist/Note.js");
+var privateHeaderMap = new WeakMap();
+/**
+ * A Track is a collection of 'notes' and 'controlChanges'.
+ */
+var Track = /** @class */ (function () {
+    function Track(trackData, header) {
+        var _this = this;
+        /**
+         * The name of the track.
+         */
+        this.name = "";
+        /**
+         * The track's note events.
+         */
+        this.notes = [];
+        /**
+         * The control change events.
+         */
+        this.controlChanges = (0, ControlChanges_1.createControlChanges)();
+        /**
+         * The pitch bend events.
+         */
+        this.pitchBends = [];
+        privateHeaderMap.set(this, header);
+        if (trackData) {
+            // Get the name of the track.
+            var nameEvent = trackData.find(function (e) { return e.type === "trackName"; });
+            // Set empty name if 'trackName' event isn't found.
+            this.name = nameEvent ? nameEvent.text : "";
+        }
+        this.instrument = new Instrument_1.Instrument(trackData, this);
+        // Defaults to 0.
+        this.channel = 0;
+        if (trackData) {
+            var noteOns = trackData.filter(function (event) { return event.type === "noteOn"; });
+            var noteOffs = trackData.filter(function (event) { return event.type === "noteOff"; });
+            var _loop_1 = function () {
+                var currentNote = noteOns.shift();
+                // Set the channel based on the note.
+                this_1.channel = currentNote.channel;
+                // Find the corresponding note off.
+                var offIndex = noteOffs.findIndex(function (note) {
+                    return note.noteNumber === currentNote.noteNumber &&
+                        note.absoluteTime >= currentNote.absoluteTime;
+                });
+                if (offIndex !== -1) {
+                    // Once it's got the note off, add it.
+                    var noteOff = noteOffs.splice(offIndex, 1)[0];
+                    this_1.addNote({
+                        durationTicks: noteOff.absoluteTime - currentNote.absoluteTime,
+                        midi: currentNote.noteNumber,
+                        noteOffVelocity: noteOff.velocity / 127,
+                        ticks: currentNote.absoluteTime,
+                        velocity: currentNote.velocity / 127,
+                    });
+                }
+            };
+            var this_1 = this;
+            while (noteOns.length) {
+                _loop_1();
+            }
+            var controlChanges = trackData.filter(function (event) { return event.type === "controller"; });
+            controlChanges.forEach(function (event) {
+                _this.addCC({
+                    number: event.controllerType,
+                    ticks: event.absoluteTime,
+                    value: event.value / 127,
+                });
+            });
+            var pitchBends = trackData.filter(function (event) { return event.type === "pitchBend"; });
+            pitchBends.forEach(function (event) {
+                _this.addPitchBend({
+                    ticks: event.absoluteTime,
+                    // Scale the value between -2^13 to 2^13 to -2 to 2.
+                    value: event.value / Math.pow(2, 13),
+                });
+            });
+            var endOfTrackEvent = trackData.find(function (event) {
+                return event.type === "endOfTrack";
+            });
+            this.endOfTrackTicks =
+                endOfTrackEvent !== undefined
+                    ? endOfTrackEvent.absoluteTime
+                    : undefined;
+        }
+    }
+    /**
+     * Add a note to the notes array.
+     * @param props The note properties to add.
+     */
+    Track.prototype.addNote = function (props) {
+        var header = privateHeaderMap.get(this);
+        var note = new Note_1.Note({
+            midi: 0,
+            ticks: 0,
+            velocity: 1,
+        }, {
+            ticks: 0,
+            velocity: 0,
+        }, header);
+        Object.assign(note, props);
+        (0, BinarySearch_1.insert)(this.notes, note, "ticks");
+        return this;
+    };
+    /**
+     * Add a control change to the track.
+     * @param props
+     */
+    Track.prototype.addCC = function (props) {
+        var header = privateHeaderMap.get(this);
+        var cc = new ControlChange_1.ControlChange({
+            controllerType: props.number,
+        }, header);
+        delete props.number;
+        Object.assign(cc, props);
+        if (!Array.isArray(this.controlChanges[cc.number])) {
+            this.controlChanges[cc.number] = [];
+        }
+        (0, BinarySearch_1.insert)(this.controlChanges[cc.number], cc, "ticks");
+        return this;
+    };
+    /**
+     * Add a control change to the track.
+     */
+    Track.prototype.addPitchBend = function (props) {
+        var header = privateHeaderMap.get(this);
+        var pb = new PitchBend_1.PitchBend({}, header);
+        Object.assign(pb, props);
+        (0, BinarySearch_1.insert)(this.pitchBends, pb, "ticks");
+        return this;
+    };
+    Object.defineProperty(Track.prototype, "duration", {
+        /**
+         * The end time of the last event in the track.
+         */
+        get: function () {
+            if (!this.notes.length) {
+                return 0;
+            }
+            var maxDuration = this.notes[this.notes.length - 1].time +
+                this.notes[this.notes.length - 1].duration;
+            for (var i = 0; i < this.notes.length - 1; i++) {
+                var duration = this.notes[i].time + this.notes[i].duration;
+                if (maxDuration < duration) {
+                    maxDuration = duration;
+                }
+            }
+            return maxDuration;
+        },
+        enumerable: false,
+        configurable: true
+    });
+    Object.defineProperty(Track.prototype, "durationTicks", {
+        /**
+         * The end time of the last event in the track in ticks.
+         */
+        get: function () {
+            if (!this.notes.length) {
+                return 0;
+            }
+            var maxDuration = this.notes[this.notes.length - 1].ticks +
+                this.notes[this.notes.length - 1].durationTicks;
+            for (var i = 0; i < this.notes.length - 1; i++) {
+                var duration = this.notes[i].ticks + this.notes[i].durationTicks;
+                if (maxDuration < duration) {
+                    maxDuration = duration;
+                }
+            }
+            return maxDuration;
+        },
+        enumerable: false,
+        configurable: true
+    });
+    /**
+     * Assign the JSON values to this track.
+     */
+    Track.prototype.fromJSON = function (json) {
+        var _this = this;
+        this.name = json.name;
+        this.channel = json.channel;
+        this.instrument = new Instrument_1.Instrument(undefined, this);
+        this.instrument.fromJSON(json.instrument);
+        if (json.endOfTrackTicks !== undefined) {
+            this.endOfTrackTicks = json.endOfTrackTicks;
+        }
+        for (var number in json.controlChanges) {
+            if (json.controlChanges[number]) {
+                json.controlChanges[number].forEach(function (cc) {
+                    _this.addCC({
+                        number: cc.number,
+                        ticks: cc.ticks,
+                        value: cc.value,
+                    });
+                });
+            }
+        }
+        json.notes.forEach(function (n) {
+            _this.addNote({
+                durationTicks: n.durationTicks,
+                midi: n.midi,
+                ticks: n.ticks,
+                velocity: n.velocity,
+            });
+        });
+    };
+    /**
+     * Convert the track into a JSON format.
+     */
+    Track.prototype.toJSON = function () {
+        // Convert all the CCs to JSON.
+        var controlChanges = {};
+        for (var i = 0; i < 127; i++) {
+            if (this.controlChanges.hasOwnProperty(i)) {
+                controlChanges[i] = this.controlChanges[i].map(function (c) {
+                    return c.toJSON();
+                });
+            }
+        }
+        var json = {
+            channel: this.channel,
+            controlChanges: controlChanges,
+            pitchBends: this.pitchBends.map(function (pb) { return pb.toJSON(); }),
+            instrument: this.instrument.toJSON(),
+            name: this.name,
+            notes: this.notes.map(function (n) { return n.toJSON(); }),
+        };
+        if (this.endOfTrackTicks !== undefined) {
+            json.endOfTrackTicks = this.endOfTrackTicks;
+        }
+        return json;
+    };
+    return Track;
+}());
+exports.Track = Track;
+//# sourceMappingURL=Track.js.map
+
+/***/ }),
+
+/***/ "./node_modules/array-flatten/dist.es2015/index.js":
+/*!*********************************************************!*\
+  !*** ./node_modules/array-flatten/dist.es2015/index.js ***!
+  \*********************************************************/
+/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+
+"use strict";
+__webpack_require__.r(__webpack_exports__);
+/* harmony export */ __webpack_require__.d(__webpack_exports__, {
+/* harmony export */   flatten: () => (/* binding */ flatten)
+/* harmony export */ });
+/**
+ * Flatten an array indefinitely.
+ */
+function flatten(array) {
+    var result = [];
+    $flatten(array, result);
+    return result;
+}
+/**
+ * Internal flatten function recursively passes `result`.
+ */
+function $flatten(array, result) {
+    for (var i = 0; i < array.length; i++) {
+        var value = array[i];
+        if (Array.isArray(value)) {
+            $flatten(value, result);
+        }
+        else {
+            result.push(value);
+        }
+    }
+}
+//# sourceMappingURL=index.js.map
 
 /***/ }),
 
@@ -12683,2063 +14435,737 @@ module.exports = localforage_js;
 
 /***/ }),
 
-/***/ "./node_modules/midi-writer-js/build/index.js":
-/*!****************************************************!*\
-  !*** ./node_modules/midi-writer-js/build/index.js ***!
-  \****************************************************/
-/***/ ((module, __unused_webpack_exports, __webpack_require__) => {
+/***/ "./node_modules/midi-file/index.js":
+/*!*****************************************!*\
+  !*** ./node_modules/midi-file/index.js ***!
+  \*****************************************/
+/***/ ((__unused_webpack_module, exports, __webpack_require__) => {
 
-"use strict";
+exports.parseMidi = __webpack_require__(/*! ./lib/midi-parser */ "./node_modules/midi-file/lib/midi-parser.js")
+exports.writeMidi = __webpack_require__(/*! ./lib/midi-writer */ "./node_modules/midi-file/lib/midi-writer.js")
 
 
-var tonalMidi = __webpack_require__(/*! tonal-midi */ "./node_modules/tonal-midi/index.js");
+/***/ }),
 
-/**
- * MIDI file format constants.
- * @return {Constants}
- */
-var Constants = {
-  VERSION: '2.1.4',
-  HEADER_CHUNK_TYPE: [0x4d, 0x54, 0x68, 0x64],
-  // Mthd
-  HEADER_CHUNK_LENGTH: [0x00, 0x00, 0x00, 0x06],
-  // Header size for SMF
-  HEADER_CHUNK_FORMAT0: [0x00, 0x00],
-  // Midi Type 0 id
-  HEADER_CHUNK_FORMAT1: [0x00, 0x01],
-  // Midi Type 1 id
-  HEADER_CHUNK_DIVISION: [0x00, 0x80],
-  // Defaults to 128 ticks per beat
-  TRACK_CHUNK_TYPE: [0x4d, 0x54, 0x72, 0x6b],
-  // MTrk,
-  META_EVENT_ID: 0xFF,
-  META_TEXT_ID: 0x01,
-  META_COPYRIGHT_ID: 0x02,
-  META_TRACK_NAME_ID: 0x03,
-  META_INSTRUMENT_NAME_ID: 0x04,
-  META_LYRIC_ID: 0x05,
-  META_MARKER_ID: 0x06,
-  META_CUE_POINT: 0x07,
-  META_TEMPO_ID: 0x51,
-  META_SMTPE_OFFSET: 0x54,
-  META_TIME_SIGNATURE_ID: 0x58,
-  META_KEY_SIGNATURE_ID: 0x59,
-  META_END_OF_TRACK_ID: [0x2F, 0x00],
-  CONTROLLER_CHANGE_STATUS: 0xB0,
-  // includes channel number (0)
-  PITCH_BEND_STATUS: 0xE0 // includes channel number (0)
+/***/ "./node_modules/midi-file/lib/midi-parser.js":
+/*!***************************************************!*\
+  !*** ./node_modules/midi-file/lib/midi-parser.js ***!
+  \***************************************************/
+/***/ ((module) => {
 
-};
+// data can be any array-like object.  It just needs to support .length, .slice, and an element getter []
 
-function _typeof(obj) {
-  "@babel/helpers - typeof";
+function parseMidi(data) {
+  var p = new Parser(data)
 
-  return _typeof = "function" == typeof Symbol && "symbol" == typeof Symbol.iterator ? function (obj) {
-    return typeof obj;
-  } : function (obj) {
-    return obj && "function" == typeof Symbol && obj.constructor === Symbol && obj !== Symbol.prototype ? "symbol" : typeof obj;
-  }, _typeof(obj);
-}
+  var headerChunk = p.readChunk()
+  if (headerChunk.id != 'MThd')
+    throw "Bad MIDI file.  Expected 'MHdr', got: '" + headerChunk.id + "'"
+  var header = parseHeader(headerChunk.data)
 
-function _wrapRegExp() {
-  _wrapRegExp = function (re, groups) {
-    return new BabelRegExp(re, void 0, groups);
-  };
-
-  var _super = RegExp.prototype,
-      _groups = new WeakMap();
-
-  function BabelRegExp(re, flags, groups) {
-    var _this = new RegExp(re, flags);
-
-    return _groups.set(_this, groups || _groups.get(re)), _setPrototypeOf(_this, BabelRegExp.prototype);
+  var tracks = []
+  for (var i=0; !p.eof() && i < header.numTracks; i++) {
+    var trackChunk = p.readChunk()
+    if (trackChunk.id != 'MTrk')
+      throw "Bad MIDI file.  Expected 'MTrk', got: '" + trackChunk.id + "'"
+    var track = parseTrack(trackChunk.data)
+    tracks.push(track)
   }
 
-  function buildGroups(result, re) {
-    var g = _groups.get(re);
-
-    return Object.keys(g).reduce(function (groups, name) {
-      return groups[name] = result[g[name]], groups;
-    }, Object.create(null));
-  }
-
-  return _inherits(BabelRegExp, RegExp), BabelRegExp.prototype.exec = function (str) {
-    var result = _super.exec.call(this, str);
-
-    return result && (result.groups = buildGroups(result, this)), result;
-  }, BabelRegExp.prototype[Symbol.replace] = function (str, substitution) {
-    if ("string" == typeof substitution) {
-      var groups = _groups.get(this);
-
-      return _super[Symbol.replace].call(this, str, substitution.replace(/\$<([^>]+)>/g, function (_, name) {
-        return "$" + groups[name];
-      }));
-    }
-
-    if ("function" == typeof substitution) {
-      var _this = this;
-
-      return _super[Symbol.replace].call(this, str, function () {
-        var args = arguments;
-        return "object" != typeof args[args.length - 1] && (args = [].slice.call(args)).push(buildGroups(args, _this)), substitution.apply(this, args);
-      });
-    }
-
-    return _super[Symbol.replace].call(this, str, substitution);
-  }, _wrapRegExp.apply(this, arguments);
-}
-
-function _classCallCheck(instance, Constructor) {
-  if (!(instance instanceof Constructor)) {
-    throw new TypeError("Cannot call a class as a function");
+  return {
+    header: header,
+    tracks: tracks
   }
 }
 
-function _defineProperties(target, props) {
-  for (var i = 0; i < props.length; i++) {
-    var descriptor = props[i];
-    descriptor.enumerable = descriptor.enumerable || false;
-    descriptor.configurable = true;
-    if ("value" in descriptor) descriptor.writable = true;
-    Object.defineProperty(target, descriptor.key, descriptor);
-  }
-}
 
-function _createClass(Constructor, protoProps, staticProps) {
-  if (protoProps) _defineProperties(Constructor.prototype, protoProps);
-  if (staticProps) _defineProperties(Constructor, staticProps);
-  Object.defineProperty(Constructor, "prototype", {
-    writable: false
-  });
-  return Constructor;
-}
+function parseHeader(data) {
+  var p = new Parser(data)
 
-function _inherits(subClass, superClass) {
-  if (typeof superClass !== "function" && superClass !== null) {
-    throw new TypeError("Super expression must either be null or a function");
+  var format = p.readUInt16()
+  var numTracks = p.readUInt16()
+
+  var result = {
+    format: format,
+    numTracks: numTracks
   }
 
-  subClass.prototype = Object.create(superClass && superClass.prototype, {
-    constructor: {
-      value: subClass,
-      writable: true,
-      configurable: true
-    }
-  });
-  Object.defineProperty(subClass, "prototype", {
-    writable: false
-  });
-  if (superClass) _setPrototypeOf(subClass, superClass);
-}
-
-function _setPrototypeOf(o, p) {
-  _setPrototypeOf = Object.setPrototypeOf || function _setPrototypeOf(o, p) {
-    o.__proto__ = p;
-    return o;
-  };
-
-  return _setPrototypeOf(o, p);
-}
-
-/**
- * Static utility functions used throughout the library.
- */
-
-var Utils = /*#__PURE__*/function () {
-  function Utils() {
-    _classCallCheck(this, Utils);
+  var timeDivision = p.readUInt16()
+  if (timeDivision & 0x8000) {
+    result.framesPerSecond = 0x100 - (timeDivision >> 8)
+    result.ticksPerFrame = timeDivision & 0xFF
+  } else {
+    result.ticksPerBeat = timeDivision
   }
 
-  _createClass(Utils, null, [{
-    key: "version",
-    value:
-    /**
-     * Gets MidiWriterJS version number.
-     * @return {string}
-     */
-    function version() {
-      return Constants.VERSION;
-    }
-    /**
-     * Convert a string to an array of bytes
-     * @param {string} string
-     * @return {array}
-     */
+  return result
+}
 
-  }, {
-    key: "stringToBytes",
-    value: function stringToBytes(string) {
-      return string.split('').map(function (_char) {
-        return _char.charCodeAt();
-      });
-    }
-    /**
-     * Checks if argument is a valid number.
-     * @param {*} n - Value to check
-     * @return {boolean}
-     */
+function parseTrack(data) {
+  var p = new Parser(data)
 
-  }, {
-    key: "isNumeric",
-    value: function isNumeric(n) {
-      return !isNaN(parseFloat(n)) && isFinite(n);
-    }
-    /**
-     * Returns the correct MIDI number for the specified pitch.
-     * Uses Tonal Midi - https://github.com/danigb/tonal/tree/master/packages/midi
-     * @param {(string|number)} pitch - 'C#4' or midi note code
-     * @param {string} middleC
-     * @return {number}
-     */
+  var events = []
+  while (!p.eof()) {
+    var event = readEvent()
+    events.push(event)
+  }
 
-  }, {
-    key: "getPitch",
-    value: function getPitch(pitch) {
-      var middleC = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 'C4';
-      return 60 - tonalMidi.toMidi(middleC) + tonalMidi.toMidi(pitch);
-    }
-    /**
-     * Translates number of ticks to MIDI timestamp format, returning an array of
-     * hex strings with the time values. Midi has a very particular time to express time,
-     * take a good look at the spec before ever touching this function.
-     * Thanks to https://github.com/sergi/jsmidi
-     *
-     * @param {number} ticks - Number of ticks to be translated
-     * @return {array} - Bytes that form the MIDI time value
-     */
+  return events
 
-  }, {
-    key: "numberToVariableLength",
-    value: function numberToVariableLength(ticks) {
-      ticks = Math.round(ticks);
-      var buffer = ticks & 0x7F; // eslint-disable-next-line no-cond-assign
+  var lastEventTypeByte = null
 
-      while (ticks = ticks >> 7) {
-        buffer <<= 8;
-        buffer |= ticks & 0x7F | 0x80;
-      }
+  function readEvent() {
+    var event = {}
+    event.deltaTime = p.readVarInt()
 
-      var bList = [];
+    var eventTypeByte = p.readUInt8()
 
-      while (true) {
-        bList.push(buffer & 0xff);
-        if (buffer & 0x80) buffer >>= 8;else {
-          break;
+    if ((eventTypeByte & 0xf0) === 0xf0) {
+      // system / meta event
+      if (eventTypeByte === 0xff) {
+        // meta event
+        event.meta = true
+        var metatypeByte = p.readUInt8()
+        var length = p.readVarInt()
+        switch (metatypeByte) {
+          case 0x00:
+            event.type = 'sequenceNumber'
+            if (length !== 2) throw "Expected length for sequenceNumber event is 2, got " + length
+            event.number = p.readUInt16()
+            return event
+          case 0x01:
+            event.type = 'text'
+            event.text = p.readString(length)
+            return event
+          case 0x02:
+            event.type = 'copyrightNotice'
+            event.text = p.readString(length)
+            return event
+          case 0x03:
+            event.type = 'trackName'
+            event.text = p.readString(length)
+            return event
+          case 0x04:
+            event.type = 'instrumentName'
+            event.text = p.readString(length)
+            return event
+          case 0x05:
+            event.type = 'lyrics'
+            event.text = p.readString(length)
+            return event
+          case 0x06:
+            event.type = 'marker'
+            event.text = p.readString(length)
+            return event
+          case 0x07:
+            event.type = 'cuePoint'
+            event.text = p.readString(length)
+            return event
+          case 0x20:
+            event.type = 'channelPrefix'
+            if (length != 1) throw "Expected length for channelPrefix event is 1, got " + length
+            event.channel = p.readUInt8()
+            return event
+          case 0x21:
+            event.type = 'portPrefix'
+            if (length != 1) throw "Expected length for portPrefix event is 1, got " + length
+            event.port = p.readUInt8()
+            return event
+          case 0x2f:
+            event.type = 'endOfTrack'
+            if (length != 0) throw "Expected length for endOfTrack event is 0, got " + length
+            return event
+          case 0x51:
+            event.type = 'setTempo';
+            if (length != 3) throw "Expected length for setTempo event is 3, got " + length
+            event.microsecondsPerBeat = p.readUInt24()
+            return event
+          case 0x54:
+            event.type = 'smpteOffset';
+            if (length != 5) throw "Expected length for smpteOffset event is 5, got " + length
+            var hourByte = p.readUInt8()
+            var FRAME_RATES = { 0x00: 24, 0x20: 25, 0x40: 29, 0x60: 30 }
+            event.frameRate = FRAME_RATES[hourByte & 0x60]
+            event.hour = hourByte & 0x1f
+            event.min = p.readUInt8()
+            event.sec = p.readUInt8()
+            event.frame = p.readUInt8()
+            event.subFrame = p.readUInt8()
+            return event
+          case 0x58:
+            event.type = 'timeSignature'
+            if (length != 2 && length != 4) throw "Expected length for timeSignature event is 4 or 2, got " + length
+            event.numerator = p.readUInt8()
+            event.denominator = (1 << p.readUInt8())
+            if (length === 4) {
+              event.metronome = p.readUInt8()
+              event.thirtyseconds = p.readUInt8()
+            } else {
+              event.metronome = 0x24
+              event.thirtyseconds = 0x08
+            }
+            return event
+          case 0x59:
+            event.type = 'keySignature'
+            if (length != 2) throw "Expected length for keySignature event is 2, got " + length
+            event.key = p.readInt8()
+            event.scale = p.readUInt8()
+            return event
+          case 0x7f:
+            event.type = 'sequencerSpecific'
+            event.data = p.readBytes(length)
+            return event
+          default:
+            event.type = 'unknownMeta'
+            event.data = p.readBytes(length)
+            event.metatypeByte = metatypeByte
+            return event
         }
-      }
-
-      return bList;
-    }
-    /**
-     * Counts number of bytes in string
-     * @param {string} s
-     * @return {array}
-     */
-
-  }, {
-    key: "stringByteCount",
-    value: function stringByteCount(s) {
-      return encodeURI(s).split(/%..|./).length - 1;
-    }
-    /**
-     * Get an int from an array of bytes.
-     * @param {array} bytes
-     * @return {number}
-     */
-
-  }, {
-    key: "numberFromBytes",
-    value: function numberFromBytes(bytes) {
-      var hex = '';
-      var stringResult;
-      bytes.forEach(function (_byte) {
-        stringResult = _byte.toString(16); // ensure string is 2 chars
-
-        if (stringResult.length == 1) stringResult = "0" + stringResult;
-        hex += stringResult;
-      });
-      return parseInt(hex, 16);
-    }
-    /**
-     * Takes a number and splits it up into an array of bytes.  Can be padded by passing a number to bytesNeeded
-     * @param {number} number
-     * @param {number} bytesNeeded
-     * @return {array} - Array of bytes
-     */
-
-  }, {
-    key: "numberToBytes",
-    value: function numberToBytes(number, bytesNeeded) {
-      bytesNeeded = bytesNeeded || 1;
-      var hexString = number.toString(16);
-
-      if (hexString.length & 1) {
-        // Make sure hex string is even number of chars
-        hexString = '0' + hexString;
-      } // Split hex string into an array of two char elements
-
-
-      var hexArray = hexString.match(/.{2}/g); // Now parse them out as integers
-
-      hexArray = hexArray.map(function (item) {
-        return parseInt(item, 16);
-      }); // Prepend empty bytes if we don't have enough
-
-      if (hexArray.length < bytesNeeded) {
-        while (bytesNeeded - hexArray.length > 0) {
-          hexArray.unshift(0);
-        }
-      }
-
-      return hexArray;
-    }
-    /**
-     * Converts value to array if needed.
-     * @param {string} value
-     * @return {array}
-     */
-
-  }, {
-    key: "toArray",
-    value: function toArray(value) {
-      if (Array.isArray(value)) return value;
-      return [value];
-    }
-    /**
-     * Converts velocity to value 0-127
-     * @param {number} velocity - Velocity value 1-100
-     * @return {number}
-     */
-
-  }, {
-    key: "convertVelocity",
-    value: function convertVelocity(velocity) {
-      // Max passed value limited to 100
-      velocity = velocity > 100 ? 100 : velocity;
-      return Math.round(velocity / 100 * 127);
-    }
-    /**
-     * Gets the total number of ticks of a specified duration.
-     * Note: type=='note' defaults to quarter note, type==='rest' defaults to 0
-     * @param {(string|array)} duration
-     * @return {number}
-     */
-
-  }, {
-    key: "getTickDuration",
-    value: function getTickDuration(duration) {
-      if (Array.isArray(duration)) {
-        // Recursively execute this method for each item in the array and return the sum of tick durations.
-        return duration.map(function (value) {
-          return Utils.getTickDuration(value);
-        }).reduce(function (a, b) {
-          return a + b;
-        }, 0);
-      }
-
-      duration = duration.toString();
-
-      if (duration.toLowerCase().charAt(0) === 't') {
-        // If duration starts with 't' then the number that follows is an explicit tick count
-        var ticks = parseInt(duration.substring(1));
-
-        if (isNaN(ticks) || ticks < 0) {
-          throw new Error(duration + ' is not a valid duration.');
-        }
-
-        return ticks;
-      } // Need to apply duration here.  Quarter note == Constants.HEADER_CHUNK_DIVISION
-
-
-      var quarterTicks = Utils.numberFromBytes(Constants.HEADER_CHUNK_DIVISION);
-      var tickDuration = quarterTicks * Utils.getDurationMultiplier(duration);
-      return Utils.getRoundedIfClose(tickDuration);
-    }
-    /**
-     * Due to rounding errors in JavaScript engines,
-     * it's safe to round when we're very close to the actual tick number
-     *
-     * @static
-     * @param {number} tick
-     * @return {number}
-     */
-
-  }, {
-    key: "getRoundedIfClose",
-    value: function getRoundedIfClose(tick) {
-      var roundedTick = Math.round(tick);
-      return Math.abs(roundedTick - tick) < 0.000001 ? roundedTick : tick;
-    }
-    /**
-     * Due to low precision of MIDI,
-     * we need to keep track of rounding errors in deltas.
-     * This function will calculate the rounding error for a given duration.
-     *
-     * @static
-     * @param {number} tick
-     * @return {number}
-     */
-
-  }, {
-    key: "getPrecisionLoss",
-    value: function getPrecisionLoss(tick) {
-      var roundedTick = Math.round(tick);
-      return roundedTick - tick;
-    }
-    /**
-     * Gets what to multiple ticks/quarter note by to get the specified duration.
-     * Note: type=='note' defaults to quarter note, type==='rest' defaults to 0
-     * @param {string} duration
-     * @return {number}
-     */
-
-  }, {
-    key: "getDurationMultiplier",
-    value: function getDurationMultiplier(duration) {
-      // Need to apply duration here.
-      // Quarter note == Constants.HEADER_CHUNK_DIVISION ticks.
-      if (duration === '0') return 0;
-      var match = duration.match( /*#__PURE__*/_wrapRegExp(/^(d+)?(\d+)(?:t(\d*))?/, {
-        dotted: 1,
-        base: 2,
-        tuplet: 3
-      }));
-
-      if (match) {
-        var base = Number(match.groups.base); // 1 or any power of two:
-
-        var isValidBase = base === 1 || (base & base - 1) === 0;
-
-        if (isValidBase) {
-          // how much faster or slower is this note compared to a quarter?
-          var ratio = base / 4;
-          var durationInQuarters = 1 / ratio;
-          var _match$groups = match.groups,
-              dotted = _match$groups.dotted,
-              tuplet = _match$groups.tuplet;
-
-          if (dotted) {
-            var thisManyDots = dotted.length;
-            var divisor = Math.pow(2, thisManyDots);
-            durationInQuarters = durationInQuarters + durationInQuarters * ((divisor - 1) / divisor);
-          }
-
-          if (typeof tuplet === 'string') {
-            var fitInto = durationInQuarters * 2; // default to triplet:
-
-            var thisManyNotes = Number(tuplet || '3');
-            durationInQuarters = fitInto / thisManyNotes;
-          }
-
-          return durationInQuarters;
-        }
-      }
-
-      throw new Error(duration + ' is not a valid duration.');
-    }
-  }]);
-
-  return Utils;
-}();
-
-/**
- * Holds all data for a "controller change" MIDI event
- * @param {object} fields {controllerNumber: integer, controllerValue: integer, delta: integer}
- * @return {ControllerChangeEvent}
- */
-
-var ControllerChangeEvent = /*#__PURE__*/_createClass(function ControllerChangeEvent(fields) {
-  _classCallCheck(this, ControllerChangeEvent);
-
-  // Set default fields
-  fields = Object.assign({
-    delta: 0x00
-  }, fields);
-  this.type = 'controller'; // delta time defaults to 0.
-
-  this.data = Utils.numberToVariableLength(fields.delta).concat(Constants.CONTROLLER_CHANGE_STATUS, fields.controllerNumber, fields.controllerValue);
-});
-
-/**
- * Object representation of a cue point meta event.
- * @param {object} fields {text: string, delta: integer}
- * @return {CuePointEvent}
- */
-
-var CuePointEvent = /*#__PURE__*/_createClass(function CuePointEvent(fields) {
-  _classCallCheck(this, CuePointEvent);
-
-  // Set default fields
-  fields = Object.assign({
-    delta: 0x00
-  }, fields);
-  this.type = 'cue-point';
-  var textBytes = Utils.stringToBytes(fields.text); // Start with zero time delta
-
-  this.data = Utils.numberToVariableLength(fields.delta).concat(Constants.META_EVENT_ID, Constants.META_CUE_POINT, Utils.numberToVariableLength(textBytes.length), // Size
-  textBytes // Text
-  );
-});
-
-/**
- * Object representation of a end track meta event.
- * @param {object} fields {delta: integer}
- * @return {EndTrackEvent}
- */
-
-var EndTrackEvent = /*#__PURE__*/_createClass(function EndTrackEvent(fields) {
-  _classCallCheck(this, EndTrackEvent);
-
-  // Set default fields
-  fields = Object.assign({
-    delta: 0x00
-  }, fields);
-  this.type = 'end-track'; // Start with zero time delta
-
-  this.data = Utils.numberToVariableLength(fields.delta).concat(Constants.META_EVENT_ID, Constants.META_END_OF_TRACK_ID);
-});
-
-/**
- * Object representation of an instrument name meta event.
- * @param {object} fields {text: string, delta: integer}
- * @return {InstrumentNameEvent}
- */
-
-var InstrumentNameEvent = /*#__PURE__*/_createClass(function InstrumentNameEvent(fields) {
-  _classCallCheck(this, InstrumentNameEvent);
-
-  // Set default fields
-  fields = Object.assign({
-    delta: 0x00
-  }, fields);
-  this.type = 'instrument-name';
-  var textBytes = Utils.stringToBytes(fields.text); // Start with zero time delta
-
-  this.data = Utils.numberToVariableLength(fields.delta).concat(Constants.META_EVENT_ID, Constants.META_INSTRUMENT_NAME_ID, Utils.numberToVariableLength(textBytes.length), // Size
-  textBytes // Instrument name
-  );
-});
-
-/**
- * Object representation of a key signature meta event.
- * @return {KeySignatureEvent}
- */
-
-var KeySignatureEvent = /*#__PURE__*/_createClass(function KeySignatureEvent(sf, mi) {
-  _classCallCheck(this, KeySignatureEvent);
-
-  this.type = 'key-signature';
-  var mode = mi || 0;
-  sf = sf || 0; //	Function called with string notation
-
-  if (typeof mi === 'undefined') {
-    var fifths = [['Cb', 'Gb', 'Db', 'Ab', 'Eb', 'Bb', 'F', 'C', 'G', 'D', 'A', 'E', 'B', 'F#', 'C#'], ['ab', 'eb', 'bb', 'f', 'c', 'g', 'd', 'a', 'e', 'b', 'f#', 'c#', 'g#', 'd#', 'a#']];
-    var _sflen = sf.length;
-    var note = sf || 'C';
-    if (sf[0] === sf[0].toLowerCase()) mode = 1;
-
-    if (_sflen > 1) {
-      switch (sf.charAt(_sflen - 1)) {
-        case 'm':
-          mode = 1;
-          note = sf.charAt(0).toLowerCase();
-          note = note.concat(sf.substring(1, _sflen - 1));
-          break;
-
-        case '-':
-          mode = 1;
-          note = sf.charAt(0).toLowerCase();
-          note = note.concat(sf.substring(1, _sflen - 1));
-          break;
-
-        case 'M':
-          mode = 0;
-          note = sf.charAt(0).toUpperCase();
-          note = note.concat(sf.substring(1, _sflen - 1));
-          break;
-
-        case '+':
-          mode = 0;
-          note = sf.charAt(0).toUpperCase();
-          note = note.concat(sf.substring(1, _sflen - 1));
-          break;
-      }
-    }
-
-    var fifthindex = fifths[mode].indexOf(note);
-    sf = fifthindex === -1 ? 0 : fifthindex - 7;
-  } // Start with zero time delta
-
-
-  this.data = Utils.numberToVariableLength(0x00).concat(Constants.META_EVENT_ID, Constants.META_KEY_SIGNATURE_ID, [0x02], // Size
-  Utils.numberToBytes(sf, 1), // Number of sharp or flats ( < 0 flat; > 0 sharp)
-  Utils.numberToBytes(mode, 1) // Mode: 0 major, 1 minor
-  );
-});
-
-/**
- * Object representation of a lyric meta event.
- * @param {object} fields {text: string, delta: integer}
- * @return {LyricEvent}
- */
-
-var LyricEvent = /*#__PURE__*/_createClass(function LyricEvent(fields) {
-  _classCallCheck(this, LyricEvent);
-
-  // Set default fields
-  fields = Object.assign({
-    delta: 0x00
-  }, fields);
-  this.type = 'lyric';
-  var textBytes = Utils.stringToBytes(fields.text); // Start with zero time delta
-
-  this.data = Utils.numberToVariableLength(fields.delta).concat(Constants.META_EVENT_ID, Constants.META_LYRIC_ID, Utils.numberToVariableLength(textBytes.length), // Size
-  textBytes // Text
-  );
-});
-
-/**
- * Object representation of a marker meta event.
- * @param {object} fields {text: string, delta: integer}
- * @return {MarkerEvent}
- */
-
-var MarkerEvent = /*#__PURE__*/_createClass(function MarkerEvent(fields) {
-  _classCallCheck(this, MarkerEvent);
-
-  // Set default fields
-  fields = Object.assign({
-    delta: 0x00
-  }, fields);
-  this.type = 'marker';
-  var textBytes = Utils.stringToBytes(fields.text); // Start with zero time delta
-
-  this.data = Utils.numberToVariableLength(fields.delta).concat(Constants.META_EVENT_ID, Constants.META_MARKER_ID, Utils.numberToVariableLength(textBytes.length), // Size
-  textBytes // Text
-  );
-});
-
-/**
- * Holds all data for a "note on" MIDI event
- * @param {object} fields {data: []}
- * @return {NoteOnEvent}
- */
-
-var NoteOnEvent = /*#__PURE__*/function () {
-  function NoteOnEvent(fields) {
-    _classCallCheck(this, NoteOnEvent);
-
-    // Set default fields
-    fields = Object.assign({
-      channel: 1,
-      startTick: null,
-      velocity: 50,
-      wait: 0
-    }, fields);
-    this.type = 'note-on';
-    this.channel = fields.channel;
-    this.pitch = fields.pitch;
-    this.wait = fields.wait;
-    this.velocity = fields.velocity;
-    this.startTick = fields.startTick;
-    this.tick = null;
-    this.delta = null;
-    this.data = fields.data;
-  }
-  /**
-   * Builds int array for this event.
-   * @param {Track} track - parent track
-   * @return {NoteOnEvent}
-   */
-
-
-  _createClass(NoteOnEvent, [{
-    key: "buildData",
-    value: function buildData(track, precisionDelta) {
-      var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
-      this.data = []; // Explicitly defined startTick event
-
-      if (this.startTick) {
-        this.tick = Utils.getRoundedIfClose(this.startTick); // If this is the first event in the track then use event's starting tick as delta.
-
-        if (track.tickPointer == 0) {
-          this.delta = this.tick;
-        }
+      } else if (eventTypeByte == 0xf0) {
+        event.type = 'sysEx'
+        var length = p.readVarInt()
+        event.data = p.readBytes(length)
+        return event
+      } else if (eventTypeByte == 0xf7) {
+        event.type = 'endSysEx'
+        var length = p.readVarInt()
+        event.data = p.readBytes(length)
+        return event
       } else {
-        this.delta = Utils.getTickDuration(this.wait);
-        this.tick = Utils.getRoundedIfClose(track.tickPointer + this.delta);
+        throw "Unrecognised MIDI event type byte: " + eventTypeByte
       }
-
-      this.deltaWithPrecisionCorrection = Utils.getRoundedIfClose(this.delta - precisionDelta);
-      this.data = Utils.numberToVariableLength(this.deltaWithPrecisionCorrection).concat(this.getStatusByte(), Utils.getPitch(this.pitch, options.middleC), Utils.convertVelocity(this.velocity));
-      return this;
-    }
-    /**
-     * Gets the note on status code based on the selected channel. 0x9{0-F}
-     * Note on at channel 0 is 0x90 (144)
-     * 0 = Ch 1
-     * @return {number}
-     */
-
-  }, {
-    key: "getStatusByte",
-    value: function getStatusByte() {
-      return 144 + this.channel - 1;
-    }
-  }]);
-
-  return NoteOnEvent;
-}();
-
-/**
- * Holds all data for a "note off" MIDI event
- * @param {object} fields {data: []}
- * @return {NoteOffEvent}
- */
-
-var NoteOffEvent = /*#__PURE__*/function () {
-  function NoteOffEvent(fields) {
-    _classCallCheck(this, NoteOffEvent);
-
-    // Set default fields
-    fields = Object.assign({
-      channel: 1,
-      velocity: 50,
-      tick: null
-    }, fields);
-    this.type = 'note-off';
-    this.channel = fields.channel;
-    this.pitch = fields.pitch;
-    this.duration = fields.duration;
-    this.velocity = fields.velocity;
-    this.tick = fields.tick;
-    this.delta = Utils.getTickDuration(this.duration);
-    this.data = fields.data;
-  }
-  /**
-   * Builds int array for this event.
-   * @param {Track} track - parent track
-   * @return {NoteOffEvent}
-   */
-
-
-  _createClass(NoteOffEvent, [{
-    key: "buildData",
-    value: function buildData(track, precisionDelta) {
-      var options = arguments.length > 2 && arguments[2] !== undefined ? arguments[2] : {};
-
-      if (this.tick === null) {
-        this.tick = Utils.getRoundedIfClose(this.delta + track.tickPointer);
-      }
-
-      this.deltaWithPrecisionCorrection = Utils.getRoundedIfClose(this.delta - precisionDelta);
-      this.data = Utils.numberToVariableLength(this.deltaWithPrecisionCorrection).concat(this.getStatusByte(), Utils.getPitch(this.pitch, options.middleC), Utils.convertVelocity(this.velocity));
-      return this;
-    }
-    /**
-     * Gets the note off status code based on the selected channel. 0x8{0-F}
-     * Note off at channel 0 is 0x80 (128)
-     * 0 = Ch 1
-     * @return {number}
-     */
-
-  }, {
-    key: "getStatusByte",
-    value: function getStatusByte() {
-      return 128 + this.channel - 1;
-    }
-  }]);
-
-  return NoteOffEvent;
-}();
-
-/**
- * Wrapper for noteOnEvent/noteOffEvent objects that builds both events.
- * @param {object} fields - {pitch: '[C4]', duration: '4', wait: '4', velocity: 1-100}
- * @return {NoteEvent}
- */
-
-var NoteEvent = /*#__PURE__*/function () {
-  function NoteEvent(fields) {
-    _classCallCheck(this, NoteEvent);
-
-    // Set default fields
-    fields = Object.assign({
-      channel: 1,
-      repeat: 1,
-      sequential: false,
-      startTick: null,
-      velocity: 50,
-      wait: 0
-    }, fields);
-    this.data = [];
-    this.type = 'note';
-    this.pitch = Utils.toArray(fields.pitch);
-    this.channel = fields.channel;
-    this.duration = fields.duration;
-    this.grace = fields.grace;
-    this.repeat = fields.repeat;
-    this.sequential = fields.sequential;
-    this.startTick = fields.startTick;
-    this.velocity = fields.velocity;
-    this.wait = fields.wait;
-    this.tickDuration = Utils.getTickDuration(this.duration);
-    this.restDuration = Utils.getTickDuration(this.wait);
-    this.events = []; // Hold actual NoteOn/NoteOff events
-  }
-  /**
-   * Builds int array for this event.
-   * @return {NoteEvent}
-   */
-
-
-  _createClass(NoteEvent, [{
-    key: "buildData",
-    value: function buildData() {
-      var _this = this;
-
-      // Reset data array
-      this.data = []; // Apply grace note(s) and subtract ticks (currently 1 tick per grace note) from tickDuration so net value is the same
-
-      if (this.grace) {
-        var graceDuration = 1;
-        this.grace = Utils.toArray(this.grace);
-        this.grace.forEach(function () {
-          var noteEvent = new NoteEvent({
-            pitch: _this.grace,
-            duration: 'T' + graceDuration
-          });
-          _this.data = _this.data.concat(noteEvent.data);
-        });
-      } // fields.pitch could be an array of pitches.
-      // If so create note events for each and apply the same duration.
-      // By default this is a chord if it's an array of notes that requires one NoteOnEvent.
-      // If this.sequential === true then it's a sequential string of notes that requires separate NoteOnEvents.
-
-
-      if (!this.sequential) {
-        // Handle repeat
-        for (var j = 0; j < this.repeat; j++) {
-          // Note on
-          this.pitch.forEach(function (p, i) {
-            var noteOnNew;
-
-            if (i == 0) {
-              noteOnNew = new NoteOnEvent({
-                channel: _this.channel,
-                wait: _this.wait,
-                velocity: _this.velocity,
-                pitch: p,
-                startTick: _this.startTick
-              });
-            } else {
-              // Running status (can ommit the note on status)
-              //noteOn = new NoteOnEvent({data: [0, Utils.getPitch(p), Utils.convertVelocity(this.velocity)]});
-              noteOnNew = new NoteOnEvent({
-                channel: _this.channel,
-                wait: 0,
-                velocity: _this.velocity,
-                pitch: p,
-                startTick: _this.startTick
-              });
-            }
-
-            _this.events.push(noteOnNew);
-          }); // Note off
-
-          this.pitch.forEach(function (p, i) {
-            var noteOffNew;
-
-            if (i == 0) {
-              //noteOff = new NoteOffEvent({data: Utils.numberToVariableLength(tickDuration).concat(this.getNoteOffStatus(), Utils.getPitch(p), Utils.convertVelocity(this.velocity))});
-              noteOffNew = new NoteOffEvent({
-                channel: _this.channel,
-                duration: _this.duration,
-                velocity: _this.velocity,
-                pitch: p,
-                tick: _this.startTick !== null ? Utils.getTickDuration(_this.duration) + _this.startTick : null
-              });
-            } else {
-              // Running status (can ommit the note off status)
-              //noteOff = new NoteOffEvent({data: [0, Utils.getPitch(p), Utils.convertVelocity(this.velocity)]});
-              noteOffNew = new NoteOffEvent({
-                channel: _this.channel,
-                duration: 0,
-                velocity: _this.velocity,
-                pitch: p,
-                tick: _this.startTick !== null ? Utils.getTickDuration(_this.duration) + _this.startTick : null
-              });
-            }
-
-            _this.events.push(noteOffNew);
-          });
-        }
+    } else {
+      // channel event
+      var param1
+      if ((eventTypeByte & 0x80) === 0) {
+        // running status - reuse lastEventTypeByte as the event type.
+        // eventTypeByte is actually the first parameter
+        if (lastEventTypeByte === null)
+          throw "Running status byte encountered before status byte"
+        param1 = eventTypeByte
+        eventTypeByte = lastEventTypeByte
+        event.running = true
       } else {
-        // Handle repeat
-        for (var _j = 0; _j < this.repeat; _j++) {
-          this.pitch.forEach(function (p, i) {
-            var noteOnNew = new NoteOnEvent({
-              channel: _this.channel,
-              wait: i > 0 ? 0 : _this.wait,
-              // wait only applies to first note in repetition
-              velocity: _this.velocity,
-              pitch: p,
-              startTick: _this.startTick
-            });
-            var noteOffNew = new NoteOffEvent({
-              channel: _this.channel,
-              duration: _this.duration,
-              velocity: _this.velocity,
-              pitch: p
-            });
-
-            _this.events.push(noteOnNew, noteOffNew);
-          });
-        }
+        param1 = p.readUInt8()
+        lastEventTypeByte = eventTypeByte
       }
-
-      return this;
-    }
-  }]);
-
-  return NoteEvent;
-}();
-
-/**
- * Holds all data for a "Pitch Bend" MIDI event
- * [ -1.0, 0, 1.0 ] ->  [ 0, 8192, 16383]
- * @param {object} fields { bend : float, channel : int, delta: int }
- * @return {PitchBendEvent}
- */
-
-var scale14bits = function scale14bits(zeroOne) {
-  if (zeroOne <= 0) {
-    return Math.floor(16384 * (zeroOne + 1) / 2);
-  }
-
-  return Math.floor(16383 * (zeroOne + 1) / 2);
-};
-
-var PitchBendEvent = /*#__PURE__*/_createClass(function PitchBendEvent(fields) {
-  _classCallCheck(this, PitchBendEvent);
-
-  // Set default fields
-  fields = Object.assign({
-    delta: 0x00
-  }, fields);
-  this.type = 'pitch-bend';
-  var bend14 = scale14bits(fields.bend);
-  var channel = fields.channel || 0;
-  var lsbValue = bend14 & 0x7f;
-  var msbValue = bend14 >> 7 & 0x7f;
-  this.data = Utils.numberToVariableLength(fields.delta).concat(Constants.PITCH_BEND_STATUS | channel, lsbValue, msbValue);
-});
-
-/**
- * Holds all data for a "program change" MIDI event
- * @param {object} fields {instrument: integer, delta: integer}
- * @return {ProgramChangeEvent}
- */
-
-var ProgramChangeEvent = /*#__PURE__*/function () {
-  function ProgramChangeEvent(fields) {
-    _classCallCheck(this, ProgramChangeEvent);
-
-    // Set default fields
-    this.fields = Object.assign({
-      channel: 1,
-      delta: 0x00
-    }, fields);
-    this.type = 'program'; // delta time defaults to 0.
-
-    this.data = Utils.numberToVariableLength(this.fields.delta).concat(this.getStatusByte(), this.fields.instrument);
-  }
-  /**
-   * Gets the status code based on the selected channel. 0xC{0-F}
-   * Program change status byte for channel 0 is 0xC0 (192)
-   * 0 = Ch 1
-   * @return {number}
-   */
-
-
-  _createClass(ProgramChangeEvent, [{
-    key: "getStatusByte",
-    value: function getStatusByte() {
-      return 192 + this.fields.channel - 1;
-    }
-  }]);
-
-  return ProgramChangeEvent;
-}();
-
-/**
- * Object representation of a tempo meta event.
- * @param {object} fields {bpm: integer, delta: integer}
- * @return {TempoEvent}
- */
-
-var TempoEvent = /*#__PURE__*/_createClass(function TempoEvent(fields) {
-  _classCallCheck(this, TempoEvent);
-
-  // Set default fields
-  fields = Object.assign({
-    delta: 0x00
-  }, fields);
-  this.type = 'tempo';
-  this.tick = fields.tick;
-  var tempo = Math.round(60000000 / fields.bpm); // Start with zero time delta
-
-  this.data = Utils.numberToVariableLength(fields.delta).concat(Constants.META_EVENT_ID, Constants.META_TEMPO_ID, [0x03], // Size
-  Utils.numberToBytes(tempo, 3) // Tempo, 3 bytes
-  );
-});
-
-/**
- * Object representation of a tempo meta event.
- * @param {object} fields {text: string, delta: integer}
- * @return {TextEvent}
- */
-
-var TextEvent = /*#__PURE__*/_createClass(function TextEvent(fields) {
-  _classCallCheck(this, TextEvent);
-
-  // Set default fields
-  fields = Object.assign({
-    delta: 0x00
-  }, fields);
-  this.type = 'text';
-  var textBytes = Utils.stringToBytes(fields.text); // Start with zero time delta
-
-  this.data = Utils.numberToVariableLength(fields.delta).concat(Constants.META_EVENT_ID, Constants.META_TEXT_ID, Utils.numberToVariableLength(textBytes.length), // Size
-  textBytes // Text
-  );
-});
-
-/**
- * Object representation of a time signature meta event.
- * @return {TimeSignatureEvent}
- */
-
-var TimeSignatureEvent = /*#__PURE__*/_createClass(function TimeSignatureEvent(numerator, denominator, midiclockspertick, notespermidiclock) {
-  _classCallCheck(this, TimeSignatureEvent);
-
-  this.type = 'time-signature'; // Start with zero time delta
-
-  this.data = Utils.numberToVariableLength(0x00).concat(Constants.META_EVENT_ID, Constants.META_TIME_SIGNATURE_ID, [0x04], // Size
-  Utils.numberToBytes(numerator, 1), // Numerator, 1 bytes
-  Utils.numberToBytes(Math.log2(denominator), 1), // Denominator is expressed as pow of 2, 1 bytes
-  Utils.numberToBytes(midiclockspertick || 24, 1), // MIDI Clocks per tick, 1 bytes
-  Utils.numberToBytes(notespermidiclock || 8, 1) // Number of 1/32 notes per MIDI clocks, 1 bytes
-  );
-});
-
-/**
- * Object representation of a tempo meta event.
- * @param {object} fields {text: string, delta: integer}
- * @return {CopyrightEvent}
- */
-
-var CopyrightEvent = /*#__PURE__*/_createClass(function CopyrightEvent(fields) {
-  _classCallCheck(this, CopyrightEvent);
-
-  // Set default fields
-  fields = Object.assign({
-    delta: 0x00
-  }, fields);
-  this.type = 'copyright';
-  var textBytes = Utils.stringToBytes(fields.text); // Start with zero time delta
-
-  this.data = Utils.numberToVariableLength(fields.delta).concat(Constants.META_EVENT_ID, Constants.META_COPYRIGHT_ID, Utils.numberToVariableLength(textBytes.length), // Size
-  textBytes // Text
-  );
-});
-
-/**
- * Object representation of a tempo meta event.
- * @param {object} fields {text: string, delta: integer}
- * @return {TrackNameEvent}
- */
-
-var TrackNameEvent = /*#__PURE__*/_createClass(function TrackNameEvent(fields) {
-  _classCallCheck(this, TrackNameEvent);
-
-  // Set default fields
-  fields = Object.assign({
-    delta: 0x00
-  }, fields);
-  this.type = 'track-name';
-  var textBytes = Utils.stringToBytes(fields.text); // Start with zero time delta
-
-  this.data = Utils.numberToVariableLength(fields.delta).concat(Constants.META_EVENT_ID, Constants.META_TRACK_NAME_ID, Utils.numberToVariableLength(textBytes.length), // Size
-  textBytes // Text
-  );
-});
-
-/**
- * Holds all data for a track.
- * @param {object} fields {type: number, data: array, size: array, events: array}
- * @return {Track}
- */
-
-var Track = /*#__PURE__*/function () {
-  function Track() {
-    _classCallCheck(this, Track);
-
-    this.type = Constants.TRACK_CHUNK_TYPE;
-    this.data = [];
-    this.size = [];
-    this.events = [];
-    this.explicitTickEvents = []; // If there are any events with an explicit tick defined then we will create a "sub" track for those
-    // and merge them in and the end.
-
-    this.tickPointer = 0; // Each time an event is added this will increase
-  }
-  /**
-   * Adds any event type to the track.
-   * Events without a specific startTick property are assumed to be added in order of how they should output.
-   * Events with a specific startTick property are set aside for now will be merged in during build process.
-   * @param {(NoteEvent|ProgramChangeEvent)} events - Event object or array of Event objects.
-   * @param {function} mapFunction - Callback which can be used to apply specific properties to all events.
-   * @return {Track}
-   */
-
-
-  _createClass(Track, [{
-    key: "addEvent",
-    value: function addEvent(events, mapFunction) {
-      var _this = this;
-
-      Utils.toArray(events).forEach(function (event, i) {
-        if (event instanceof NoteEvent) {
-          // Handle map function if provided
-          if (typeof mapFunction === 'function') {
-            var properties = mapFunction(i, event);
-
-            if (_typeof(properties) === 'object') {
-              for (var j in properties) {
-                switch (j) {
-                  case 'channel':
-                    event.channel = properties[j];
-                    break;
-
-                  case 'duration':
-                    event.duration = properties[j];
-                    break;
-
-                  case 'sequential':
-                    event.sequential = properties[j];
-                    break;
-
-                  case 'velocity':
-                    event.velocity = Utils.convertVelocity(properties[j]);
-                    break;
-                }
-              }
-            }
-          } // If this note event has an explicit startTick then we need to set aside for now
-
-
-          if (event.startTick !== null) {
-            _this.explicitTickEvents.push(event);
-          } else {
-            // Push each on/off event to track's event stack
-            event.buildData().events.forEach(function (e) {
-              return _this.events.push(e);
-            });
-          }
-        } else if (event instanceof EndTrackEvent) {
-          // Only one EndTrackEvent is allowed, so remove
-          // any existing ones before adding.
-          _this.removeEventsByType('end-track');
-
-          _this.events.push(event);
-        } else {
-          _this.events.push(event);
-        }
-      });
-      return this;
-    }
-    /**
-     * Builds int array of all events.
-     * @param {object} options
-     * @return {Track}
-     */
-
-  }, {
-    key: "buildData",
-    value: function buildData() {
-      var _this2 = this;
-
-      var options = arguments.length > 0 && arguments[0] !== undefined ? arguments[0] : {};
-
-      // If the last event isn't EndTrackEvent, then tack it onto the data.
-      if (!this.events.length || !(this.events[this.events.length - 1] instanceof EndTrackEvent)) {
-        this.addEvent(new EndTrackEvent());
-      } // Reset
-
-
-      this.data = [];
-      this.size = [];
-      this.tickPointer = 0;
-      var precisionLoss = 0;
-      this.events.forEach(function (event) {
-        // Build event & add to total tick duration
-        if (event instanceof NoteOnEvent || event instanceof NoteOffEvent) {
-          var built = event.buildData(_this2, precisionLoss, options);
-          precisionLoss = Utils.getPrecisionLoss(event.deltaWithPrecisionCorrection || 0);
-          _this2.data = _this2.data.concat(built.data);
-          _this2.tickPointer = Utils.getRoundedIfClose(event.tick);
-        } else if (event instanceof TempoEvent) {
-          _this2.tickPointer = Utils.getRoundedIfClose(event.tick);
-          _this2.data = _this2.data.concat(event.data);
-        } else {
-          _this2.data = _this2.data.concat(event.data);
-        }
-      });
-      this.mergeExplicitTickEvents();
-      this.size = Utils.numberToBytes(this.data.length, 4); // 4 bytes long
-
-      return this;
-    }
-  }, {
-    key: "mergeExplicitTickEvents",
-    value: function mergeExplicitTickEvents() {
-      var _this3 = this;
-
-      if (!this.explicitTickEvents.length) return; // First sort asc list of events by startTick
-
-      this.explicitTickEvents.sort(function (a, b) {
-        return a.startTick - b.startTick;
-      }); // Now this.explicitTickEvents is in correct order, and so is this.events naturally.
-      // For each explicit tick event, splice it into the main list of events and
-      // adjust the delta on the following events so they still play normally.
-
-      this.explicitTickEvents.forEach(function (noteEvent) {
-        // Convert NoteEvent to it's respective NoteOn/NoteOff events
-        // Note that as we splice in events the delta for the NoteOff ones will
-        // Need to change based on what comes before them after the splice.
-        noteEvent.buildData().events.forEach(function (e) {
-          return e.buildData(_this3);
-        }); // Merge each event indivually into this track's event list.
-
-        noteEvent.events.forEach(function (event) {
-          return _this3.mergeSingleEvent(event);
-        });
-      }); // Hacky way to rebuild track with newly spliced events.  Need better solution.
-
-      this.explicitTickEvents = [];
-      this.buildData();
-    }
-    /**
-     * Merges another track's events with this track.
-     * @param {Track} track
-     * @return {Track}
-     */
-
-  }, {
-    key: "mergeTrack",
-    value: function mergeTrack(track) {
-      var _this4 = this;
-
-      // First build this track to populate each event's tick property
-      this.buildData(); // Then build track to be merged so that tick property is populated on all events & merge each event.
-
-      track.buildData().events.forEach(function (event) {
-        return _this4.mergeSingleEvent(event);
-      });
-    }
-    /**
-     * Merges a single event into this track's list of events based on event.tick property.
-     * @param {NoteOnEvent|NoteOffEvent} - event
-     * @return {Track}
-     */
-
-  }, {
-    key: "mergeSingleEvent",
-    value: function mergeSingleEvent(event) {
-      // There are no events yet, so just add it in.
-      if (!this.events.length) {
-        this.addEvent(event);
-        return;
-      } // Find index of existing event we need to follow with
-
-
-      var lastEventIndex;
-
-      for (var i = 0; i < this.events.length; i++) {
-        if (this.events[i].tick > event.tick) break;
-        lastEventIndex = i;
-      }
-
-      var splicedEventIndex = lastEventIndex + 1; // Need to adjust the delta of this event to ensure it falls on the correct tick.
-
-      event.delta = event.tick - this.events[lastEventIndex].tick; // Splice this event at lastEventIndex + 1
-
-      this.events.splice(splicedEventIndex, 0, event); // Now adjust delta of all following events
-
-      for (var _i = splicedEventIndex + 1; _i < this.events.length; _i++) {
-        // Since each existing event should have a tick value at this point we just need to
-        // adjust delta to that the event still falls on the correct tick.
-        this.events[_i].delta = this.events[_i].tick - this.events[_i - 1].tick;
-      }
-    }
-    /**
-     * Removes all events matching specified type.
-     * @param {string} eventType - Event type
-     * @return {Track}
-     */
-
-  }, {
-    key: "removeEventsByType",
-    value: function removeEventsByType(eventType) {
-      var _this5 = this;
-
-      this.events.forEach(function (event, index) {
-        if (event.type === eventType) {
-          _this5.events.splice(index, 1);
-        }
-      });
-      return this;
-    }
-    /**
-     * Sets tempo of the MIDI file.
-     * @param {number} bpm - Tempo in beats per minute.
-     * @param {number} tick - Start tick.
-     * @return {Track}
-     */
-
-  }, {
-    key: "setTempo",
-    value: function setTempo(bpm) {
-      var tick = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : 0;
-      return this.addEvent(new TempoEvent({
-        bpm: bpm,
-        tick: tick
-      }));
-    }
-    /**
-     * Sets time signature.
-     * @param {number} numerator - Top number of the time signature.
-     * @param {number} denominator - Bottom number of the time signature.
-     * @param {number} midiclockspertick - Defaults to 24.
-     * @param {number} notespermidiclock - Defaults to 8.
-     * @return {Track}
-     */
-
-  }, {
-    key: "setTimeSignature",
-    value: function setTimeSignature(numerator, denominator, midiclockspertick, notespermidiclock) {
-      return this.addEvent(new TimeSignatureEvent(numerator, denominator, midiclockspertick, notespermidiclock));
-    }
-    /**
-     * Sets key signature.
-     * @param {*} sf -
-     * @param {*} mi -
-     * @return {Track}
-     */
-
-  }, {
-    key: "setKeySignature",
-    value: function setKeySignature(sf, mi) {
-      return this.addEvent(new KeySignatureEvent(sf, mi));
-    }
-    /**
-     * Adds text to MIDI file.
-     * @param {string} text - Text to add.
-     * @return {Track}
-     */
-
-  }, {
-    key: "addText",
-    value: function addText(text) {
-      return this.addEvent(new TextEvent({
-        text: text
-      }));
-    }
-    /**
-     * Adds copyright to MIDI file.
-     * @param {string} text - Text of copyright line.
-     * @return {Track}
-     */
-
-  }, {
-    key: "addCopyright",
-    value: function addCopyright(text) {
-      return this.addEvent(new CopyrightEvent({
-        text: text
-      }));
-    }
-    /**
-     * Adds Sequence/Track Name.
-     * @param {string} text - Text of track name.
-     * @return {Track}
-     */
-
-  }, {
-    key: "addTrackName",
-    value: function addTrackName(text) {
-      return this.addEvent(new TrackNameEvent({
-        text: text
-      }));
-    }
-    /**
-     * Sets instrument name of track.
-     * @param {string} text - Name of instrument.
-     * @return {Track}
-     */
-
-  }, {
-    key: "addInstrumentName",
-    value: function addInstrumentName(text) {
-      return this.addEvent(new InstrumentNameEvent({
-        text: text
-      }));
-    }
-    /**
-     * Adds marker to MIDI file.
-     * @param {string} text - Marker text.
-     * @return {Track}
-     */
-
-  }, {
-    key: "addMarker",
-    value: function addMarker(text) {
-      return this.addEvent(new MarkerEvent({
-        text: text
-      }));
-    }
-    /**
-     * Adds cue point to MIDI file.
-     * @param {string} text - Text of cue point.
-     * @return {Track}
-     */
-
-  }, {
-    key: "addCuePoint",
-    value: function addCuePoint(text) {
-      return this.addEvent(new CuePointEvent({
-        text: text
-      }));
-    }
-    /**
-     * Adds lyric to MIDI file.
-     * @param {string} text - Lyric text to add.
-     * @return {Track}
-     */
-
-  }, {
-    key: "addLyric",
-    value: function addLyric(text) {
-      return this.addEvent(new LyricEvent({
-        text: text
-      }));
-    }
-    /**
-     * Channel mode messages
-     * @return {Track}
-     */
-
-  }, {
-    key: "polyModeOn",
-    value: function polyModeOn() {
-      var event = new NoteOnEvent({
-        data: [0x00, 0xB0, 0x7E, 0x00]
-      });
-      return this.addEvent(event);
-    }
-    /**
-     * Sets a pitch bend.
-     * @param {float} bend - Bend value ranging [-1,1], zero meaning no bend.
-     * @return {Track}
-     */
-
-  }, {
-    key: "setPitchBend",
-    value: function setPitchBend(bend) {
-      return this.addEvent(new PitchBendEvent({
-        bend: bend
-      }));
-    }
-    /**
-     * Adds a controller change event
-     * @param {number} number - Control number.
-     * @param {number} value - Control value.
-     * @return {Track}
-     */
-
-  }, {
-    key: "controllerChange",
-    value: function controllerChange(number, value) {
-      return this.addEvent(new ControllerChangeEvent({
-        controllerNumber: number,
-        controllerValue: value
-      }));
-    }
-  }]);
-
-  return Track;
-}();
-
-var VexFlow = /*#__PURE__*/function () {
-  function VexFlow() {
-    _classCallCheck(this, VexFlow);
-  }
-
-  _createClass(VexFlow, [{
-    key: "trackFromVoice",
-    value:
-    /**
-     * Support for converting VexFlow voice into MidiWriterJS track
-     * @return MidiWriter.Track object
-     */
-    function trackFromVoice(voice) {
-      var _this = this;
-
-      var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {
-        addRenderedAccidentals: false
-      };
-      var track = new Track();
-      var wait = [];
-      voice.tickables.forEach(function (tickable) {
-        if (tickable.noteType === 'n') {
-          track.addEvent(new NoteEvent({
-            pitch: tickable.keys.map(function (pitch, index) {
-              return _this.convertPitch(pitch, index, tickable, options.addRenderedAccidentals);
-            }),
-            duration: _this.convertDuration(tickable),
-            wait: wait
-          })); // reset wait
-
-          wait = [];
-        } else if (tickable.noteType === 'r') {
-          // move on to the next tickable and add this to the stack
-          // of the `wait` property for the next note event
-          wait.push(_this.convertDuration(tickable));
-        }
-      }); // There may be outstanding rests at the end of the track,
-      // pad with a ghost note (zero duration and velocity), just to capture the wait.
-
-      if (wait.length > 0) {
-        track.addEvent(new NoteEvent({
-          pitch: '[c4]',
-          duration: '0',
-          wait: wait,
-          velocity: '0'
-        }));
-      }
-
-      return track;
-    }
-    /**
-     * Converts VexFlow pitch syntax to MidiWriterJS syntax
-     * @param pitch string
-     * @param index pitch index
-     * @param note struct from Vexflow
-     * @param addRenderedAccidentals adds Vexflow rendered accidentals
-     */
-
-  }, {
-    key: "convertPitch",
-    value: function convertPitch(pitch, index, note) {
-      var addRenderedAccidentals = arguments.length > 3 && arguments[3] !== undefined ? arguments[3] : false;
-      // Splits note name from octave
-      var pitchParts = pitch.split('/'); // Retrieves accidentals from pitch
-      // Removes natural accidentals since they are not accepted in Tonal Midi
-
-      var accidentals = pitchParts[0].substring(1).replace('n', '');
-
-      if (addRenderedAccidentals) {
-        var _note$getAccidentals;
-
-        (_note$getAccidentals = note.getAccidentals()) === null || _note$getAccidentals === void 0 ? void 0 : _note$getAccidentals.forEach(function (accidental) {
-          if (accidental.index === index) {
-            if (accidental.type === 'n') {
-              accidentals = '';
-            } else {
-              accidentals += accidental.type;
-            }
-          }
-        });
-      }
-
-      return pitchParts[0][0] + accidentals + pitchParts[1];
-    }
-    /**
-     * Converts VexFlow duration syntax to MidiWriterJS syntax
-     * @param note struct from VexFlow
-     */
-
-  }, {
-    key: "convertDuration",
-    value: function convertDuration(note) {
-      return 'd'.repeat(note.dots) + this.convertBaseDuration(note.duration) + (note.tuplet ? 't' + note.tuplet.num_notes : '');
-    }
-    /**
-     * Converts VexFlow base duration syntax to MidiWriterJS syntax
-     * @param duration Vexflow duration
-     * @returns MidiWriterJS duration
-     */
-
-  }, {
-    key: "convertBaseDuration",
-    value: function convertBaseDuration(duration) {
-      switch (duration) {
-        case 'w':
-          return '1';
-
-        case 'h':
-          return '2';
-
-        case 'q':
-          return '4';
-
+      var eventType = eventTypeByte >> 4
+      event.channel = eventTypeByte & 0x0f
+      switch (eventType) {
+        case 0x08:
+          event.type = 'noteOff'
+          event.noteNumber = param1
+          event.velocity = p.readUInt8()
+          return event
+        case 0x09:
+          var velocity = p.readUInt8()
+          event.type = velocity === 0 ? 'noteOff' : 'noteOn'
+          event.noteNumber = param1
+          event.velocity = velocity
+          if (velocity === 0) event.byte9 = true
+          return event
+        case 0x0a:
+          event.type = 'noteAftertouch'
+          event.noteNumber = param1
+          event.amount = p.readUInt8()
+          return event
+        case 0x0b:
+          event.type = 'controller'
+          event.controllerType = param1
+          event.value = p.readUInt8()
+          return event
+        case 0x0c:
+          event.type = 'programChange'
+          event.programNumber = param1
+          return event
+        case 0x0d:
+          event.type = 'channelAftertouch'
+          event.amount = param1
+          return event
+        case 0x0e:
+          event.type = 'pitchBend'
+          event.value = (param1 + (p.readUInt8() << 7)) - 0x2000
+          return event
         default:
-          return duration;
+          throw "Unrecognised MIDI event type: " + eventType
       }
     }
-  }]);
-
-  return VexFlow;
-}();
-
-/**
- * Object representation of a header chunk section of a MIDI file.
- * @param {number} numberOfTracks - Number of tracks
- * @return {HeaderChunk}
- */
-
-var HeaderChunk = /*#__PURE__*/_createClass(function HeaderChunk(numberOfTracks) {
-  _classCallCheck(this, HeaderChunk);
-
-  this.type = Constants.HEADER_CHUNK_TYPE;
-  var trackType = numberOfTracks > 1 ? Constants.HEADER_CHUNK_FORMAT1 : Constants.HEADER_CHUNK_FORMAT0;
-  this.data = trackType.concat(Utils.numberToBytes(numberOfTracks, 2), // two bytes long,
-  Constants.HEADER_CHUNK_DIVISION);
-  this.size = [0, 0, 0, this.data.length];
-});
-
-/**
- * Object that puts together tracks and provides methods for file output.
- * @param {array|Track} tracks - A single {Track} object or an array of {Track} objects.
- * @param {object} options - {middleC: 'C4'}
- * @return {Writer}
- */
-
-var Writer = /*#__PURE__*/function () {
-  function Writer(tracks) {
-    var options = arguments.length > 1 && arguments[1] !== undefined ? arguments[1] : {};
-
-    _classCallCheck(this, Writer);
-
-    // Ensure tracks is an array
-    this.tracks = Utils.toArray(tracks);
-    this.options = options;
   }
-  /**
-   * Builds array of data from chunkschunks.
-   * @return {array}
-   */
+}
 
+function Parser(data) {
+  this.buffer = data
+  this.bufferLen = this.buffer.length
+  this.pos = 0
+}
 
-  _createClass(Writer, [{
-    key: "buildData",
-    value: function buildData() {
-      var _this = this;
+Parser.prototype.eof = function() {
+  return this.pos >= this.bufferLen
+}
 
-      var data = [];
-      data.push(new HeaderChunk(this.tracks.length)); // For each track add final end of track event and build data
+Parser.prototype.readUInt8 = function() {
+  var result = this.buffer[this.pos]
+  this.pos += 1
+  return result
+}
 
-      this.tracks.forEach(function (track) {
-        data.push(track.buildData(_this.options));
-      });
-      return data;
+Parser.prototype.readInt8 = function() {
+  var u = this.readUInt8()
+  if (u & 0x80)
+    return u - 0x100
+  else
+    return u
+}
+
+Parser.prototype.readUInt16 = function() {
+  var b0 = this.readUInt8(),
+      b1 = this.readUInt8()
+
+    return (b0 << 8) + b1
+}
+
+Parser.prototype.readInt16 = function() {
+  var u = this.readUInt16()
+  if (u & 0x8000)
+    return u - 0x10000
+  else
+    return u
+}
+
+Parser.prototype.readUInt24 = function() {
+  var b0 = this.readUInt8(),
+      b1 = this.readUInt8(),
+      b2 = this.readUInt8()
+
+    return (b0 << 16) + (b1 << 8) + b2
+}
+
+Parser.prototype.readInt24 = function() {
+  var u = this.readUInt24()
+  if (u & 0x800000)
+    return u - 0x1000000
+  else
+    return u
+}
+
+Parser.prototype.readUInt32 = function() {
+  var b0 = this.readUInt8(),
+      b1 = this.readUInt8(),
+      b2 = this.readUInt8(),
+      b3 = this.readUInt8()
+
+    return (b0 << 24) + (b1 << 16) + (b2 << 8) + b3
+}
+
+Parser.prototype.readBytes = function(len) {
+  var bytes = this.buffer.slice(this.pos, this.pos + len)
+  this.pos += len
+  return bytes
+}
+
+Parser.prototype.readString = function(len) {
+  var bytes = this.readBytes(len)
+  return String.fromCharCode.apply(null, bytes)
+}
+
+Parser.prototype.readVarInt = function() {
+  var result = 0
+  while (!this.eof()) {
+    var b = this.readUInt8()
+    if (b & 0x80) {
+      result += (b & 0x7f)
+      result <<= 7
+    } else {
+      // b is last byte
+      return result + b
     }
-    /**
-     * Builds the file into a Uint8Array
-     * @return {Uint8Array}
-     */
+  }
+  // premature eof
+  return result
+}
 
-  }, {
-    key: "buildFile",
-    value: function buildFile() {
-      var build = []; // Data consists of chunks which consists of data
+Parser.prototype.readChunk = function() {
+  var id = this.readString(4)
+  var length = this.readUInt32()
+  var data = this.readBytes(length)
+  return {
+    id: id,
+    length: length,
+    data: data
+  }
+}
 
-      this.buildData().forEach(function (d) {
-        return build = build.concat(d.type, d.size, d.data);
-      });
-      return new Uint8Array(build);
-    }
-    /**
-     * Convert file buffer to a base64 string.  Different methods depending on if browser or node.
-     * @return {string}
-     */
-
-  }, {
-    key: "base64",
-    value: function base64() {
-      if (typeof btoa === 'function') return btoa(String.fromCharCode.apply(null, this.buildFile()));
-      return Buffer.from(this.buildFile()).toString('base64');
-    }
-    /**
-     * Get the data URI.
-     * @return {string}
-     */
-
-  }, {
-    key: "dataUri",
-    value: function dataUri() {
-      return 'data:audio/midi;base64,' + this.base64();
-    }
-    /**
-     * Set option on instantiated Writer.
-     * @param {string} key
-     * @param {any} value
-     * @return {Writer}
-     */
-
-  }, {
-    key: "setOption",
-    value: function setOption(key, value) {
-      this.options[key] = value;
-      return this;
-    }
-    /**
-     * Output to stdout
-     * @return {string}
-     */
-
-  }, {
-    key: "stdout",
-    value: function stdout() {
-      return process.stdout.write(Buffer.from(this.buildFile()));
-    }
-  }]);
-
-  return Writer;
-}();
-
-var main = {
-  Constants: Constants,
-  ControllerChangeEvent: ControllerChangeEvent,
-  CuePointEvent: CuePointEvent,
-  EndTrackEvent: EndTrackEvent,
-  InstrumentNameEvent: InstrumentNameEvent,
-  KeySignatureEvent: KeySignatureEvent,
-  LyricEvent: LyricEvent,
-  MarkerEvent: MarkerEvent,
-  NoteOnEvent: NoteOnEvent,
-  NoteOffEvent: NoteOffEvent,
-  NoteEvent: NoteEvent,
-  PitchBendEvent: PitchBendEvent,
-  ProgramChangeEvent: ProgramChangeEvent,
-  TempoEvent: TempoEvent,
-  TextEvent: TextEvent,
-  TimeSignatureEvent: TimeSignatureEvent,
-  Track: Track,
-  TrackNameEvent: TrackNameEvent,
-  Utils: Utils,
-  VexFlow: VexFlow,
-  Writer: Writer
-};
-
-module.exports = main;
+module.exports = parseMidi
 
 
 /***/ }),
 
-/***/ "./node_modules/note-parser/index.js":
-/*!*******************************************!*\
-  !*** ./node_modules/note-parser/index.js ***!
-  \*******************************************/
-/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
+/***/ "./node_modules/midi-file/lib/midi-writer.js":
+/*!***************************************************!*\
+  !*** ./node_modules/midi-file/lib/midi-writer.js ***!
+  \***************************************************/
+/***/ ((module) => {
 
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-/* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   acc: () => (/* binding */ acc),
-/* harmony export */   alt: () => (/* binding */ alt),
-/* harmony export */   build: () => (/* binding */ build),
-/* harmony export */   chroma: () => (/* binding */ chroma),
-/* harmony export */   freq: () => (/* binding */ freq),
-/* harmony export */   letter: () => (/* binding */ letter),
-/* harmony export */   midi: () => (/* binding */ midi),
-/* harmony export */   oct: () => (/* binding */ oct),
-/* harmony export */   parse: () => (/* binding */ parse),
-/* harmony export */   pc: () => (/* binding */ pc),
-/* harmony export */   regex: () => (/* binding */ regex),
-/* harmony export */   step: () => (/* binding */ step)
-/* harmony export */ });
+// data should be the same type of format returned by parseMidi
+// for maximum compatibililty, returns an array of byte values, suitable for conversion to Buffer, Uint8Array, etc.
 
+// opts:
+// - running              reuse previous eventTypeByte when possible, to compress file
+// - useByte9ForNoteOff   use 0x09 for noteOff when velocity is zero
 
-// util
-function fillStr (s, num) { return Array(num + 1).join(s) }
-function isNum (x) { return typeof x === 'number' }
-function isStr (x) { return typeof x === 'string' }
-function isDef (x) { return typeof x !== 'undefined' }
-function midiToFreq (midi, tuning) {
-  return Math.pow(2, (midi - 69) / 12) * (tuning || 440)
-}
+function writeMidi(data, opts) {
+  if (typeof data !== 'object')
+    throw 'Invalid MIDI data'
 
-var REGEX = /^([a-gA-G])(#{1,}|b{1,}|x{1,}|)(-?\d*)\s*(.*)\s*$/
-/**
- * A regex for matching note strings in scientific notation.
- *
- * @name regex
- * @function
- * @return {RegExp} the regexp used to parse the note name
- *
- * The note string should have the form `letter[accidentals][octave][element]`
- * where:
- *
- * - letter: (Required) is a letter from A to G either upper or lower case
- * - accidentals: (Optional) can be one or more `b` (flats), `#` (sharps) or `x` (double sharps).
- * They can NOT be mixed.
- * - octave: (Optional) a positive or negative integer
- * - element: (Optional) additionally anything after the duration is considered to
- * be the element name (for example: 'C2 dorian')
- *
- * The executed regex contains (by array index):
- *
- * - 0: the complete string
- * - 1: the note letter
- * - 2: the optional accidentals
- * - 3: the optional octave
- * - 4: the rest of the string (trimmed)
- *
- * @example
- * var parser = require('note-parser')
- * parser.regex.exec('c#4')
- * // => ['c#4', 'c', '#', '4', '']
- * parser.regex.exec('c#4 major')
- * // => ['c#4major', 'c', '#', '4', 'major']
- * parser.regex().exec('CMaj7')
- * // => ['CMaj7', 'C', '', '', 'Maj7']
- */
-function regex () { return REGEX }
+  opts = opts || {}
 
-var SEMITONES = [0, 2, 4, 5, 7, 9, 11]
-/**
- * Parse a note name in scientific notation an return it's components,
- * and some numeric properties including midi number and frequency.
- *
- * @name parse
- * @function
- * @param {String} note - the note string to be parsed
- * @param {Boolean} isTonic - true the strings it's supposed to contain a note number
- * and some category (for example an scale: 'C# major'). It's false by default,
- * but when true, en extra tonicOf property is returned with the category ('major')
- * @param {Float} tunning - The frequency of A4 note to calculate frequencies.
- * By default it 440.
- * @return {Object} the parsed note name or null if not a valid note
- *
- * The parsed note name object will ALWAYS contains:
- * - letter: the uppercase letter of the note
- * - acc: the accidentals of the note (only sharps or flats)
- * - pc: the pitch class (letter + acc)
- * - step: s a numeric representation of the letter. It's an integer from 0 to 6
- * where 0 = C, 1 = D ... 6 = B
- * - alt: a numeric representation of the accidentals. 0 means no alteration,
- * positive numbers are for sharps and negative for flats
- * - chroma: a numeric representation of the pitch class. It's like midi for
- * pitch classes. 0 = C, 1 = C#, 2 = D ... 11 = B. Can be used to find enharmonics
- * since, for example, chroma of 'Cb' and 'B' are both 11
- *
- * If the note has octave, the parser object will contain:
- * - oct: the octave number (as integer)
- * - midi: the midi number
- * - freq: the frequency (using tuning parameter as base)
- *
- * If the parameter `isTonic` is set to true, the parsed object will contain:
- * - tonicOf: the rest of the string that follows note name (left and right trimmed)
- *
- * @example
- * var parse = require('note-parser').parse
- * parse('Cb4')
- * // => { letter: 'C', acc: 'b', pc: 'Cb', step: 0, alt: -1, chroma: -1,
- *         oct: 4, midi: 59, freq: 246.94165062806206 }
- * // if no octave, no midi, no freq
- * parse('fx')
- * // => { letter: 'F', acc: '##', pc: 'F##', step: 3, alt: 2, chroma: 7 })
- */
-function parse (str, isTonic, tuning) {
-  if (typeof str !== 'string') return null
-  var m = REGEX.exec(str)
-  if (!m || (!isTonic && m[4])) return null
+  var header = data.header || {}
+  var tracks = data.tracks || []
+  var i, len = tracks.length
 
-  var p = { letter: m[1].toUpperCase(), acc: m[2].replace(/x/g, '##') }
-  p.pc = p.letter + p.acc
-  p.step = (p.letter.charCodeAt(0) + 3) % 7
-  p.alt = p.acc[0] === 'b' ? -p.acc.length : p.acc.length
-  var pos = SEMITONES[p.step] + p.alt
-  p.chroma = pos < 0 ? 12 + pos : pos % 12
-  if (m[3]) { // has octave
-    p.oct = +m[3]
-    p.midi = pos + 12 * (p.oct + 1)
-    p.freq = midiToFreq(p.midi, tuning)
+  var w = new Writer()
+  writeHeader(w, header, len)
+
+  for (i=0; i < len; i++) {
+    writeTrack(w, tracks[i], opts)
   }
-  if (isTonic) p.tonicOf = m[4]
-  return p
+
+  return w.buffer
 }
 
-var LETTERS = 'CDEFGAB'
-function accStr (n) { return !isNum(n) ? '' : n < 0 ? fillStr('b', -n) : fillStr('#', n) }
-function octStr (n) { return !isNum(n) ? '' : '' + n }
+function writeHeader(w, header, numTracks) {
+  var format = header.format == null ? 1 : header.format
 
-/**
- * Create a string from a parsed object or `step, alteration, octave` parameters
- * @param {Object} obj - the parsed data object
- * @return {String} a note string or null if not valid parameters
- * @since 1.2
- * @example
- * parser.build(parser.parse('cb2')) // => 'Cb2'
- *
- * @example
- * // it accepts (step, alteration, octave) parameters:
- * parser.build(3) // => 'F'
- * parser.build(3, -1) // => 'Fb'
- * parser.build(3, -1, 4) // => 'Fb4'
- */
-function build (s, a, o) {
-  if (s === null || typeof s === 'undefined') return null
-  if (s.step) return build(s.step, s.alt, s.oct)
-  if (s < 0 || s > 6) return null
-  return LETTERS.charAt(s) + accStr(a) + octStr(o)
+  var timeDivision = 128
+  if (header.timeDivision) {
+    timeDivision = header.timeDivision
+  } else if (header.ticksPerFrame && header.framesPerSecond) {
+    timeDivision = (-(header.framesPerSecond & 0xFF) << 8) | (header.ticksPerFrame & 0xFF)
+  } else if (header.ticksPerBeat) {
+    timeDivision = header.ticksPerBeat & 0x7FFF
+  }
+
+  var h = new Writer()
+  h.writeUInt16(format)
+  h.writeUInt16(numTracks)
+  h.writeUInt16(timeDivision)
+
+  w.writeChunk('MThd', h.buffer)
 }
 
-/**
- * Get midi of a note
- *
- * @name midi
- * @function
- * @param {String|Integer} note - the note name or midi number
- * @return {Integer} the midi number of the note or null if not a valid note
- * or the note does NOT contains octave
- * @example
- * var parser = require('note-parser')
- * parser.midi('A4') // => 69
- * parser.midi('A') // => null
- * @example
- * // midi numbers are bypassed (even as strings)
- * parser.midi(60) // => 60
- * parser.midi('60') // => 60
- */
-function midi (note) {
-  if ((isNum(note) || isStr(note)) && note >= 0 && note < 128) return +note
-  var p = parse(note)
-  return p && isDef(p.midi) ? p.midi : null
+function writeTrack(w, track, opts) {
+  var t = new Writer()
+  var i, len = track.length
+  var eventTypeByte = null
+  for (i=0; i < len; i++) {
+    // Reuse last eventTypeByte when opts.running is set, or event.running is explicitly set on it.
+    // parseMidi will set event.running for each event, so that we can get an exact copy by default.
+    // Explicitly set opts.running to false, to override event.running and never reuse last eventTypeByte.
+    if (opts.running === false || !opts.running && !track[i].running) eventTypeByte = null
+
+    eventTypeByte = writeEvent(t, track[i], eventTypeByte, opts.useByte9ForNoteOff)
+  }
+  w.writeChunk('MTrk', t.buffer)
 }
 
-/**
- * Get freq of a note in hertzs (in a well tempered 440Hz A4)
- *
- * @name freq
- * @function
- * @param {String} note - the note name or note midi number
- * @param {String} tuning - (Optional) the A4 frequency (440 by default)
- * @return {Float} the freq of the number if hertzs or null if not valid note
- * @example
- * var parser = require('note-parser')
- * parser.freq('A4') // => 440
- * parser.freq('A') // => null
- * @example
- * // can change tuning (440 by default)
- * parser.freq('A4', 444) // => 444
- * parser.freq('A3', 444) // => 222
- * @example
- * // it accepts midi numbers (as numbers and as strings)
- * parser.freq(69) // => 440
- * parser.freq('69', 442) // => 442
- */
-function freq (note, tuning) {
-  var m = midi(note)
-  return m === null ? null : midiToFreq(m, tuning)
+function writeEvent(w, event, lastEventTypeByte, useByte9ForNoteOff) {
+  var type = event.type
+  var deltaTime = event.deltaTime
+  var text = event.text || ''
+  var data = event.data || []
+  var eventTypeByte = null
+  w.writeVarInt(deltaTime)
+
+  switch (type) {
+    // meta events
+    case 'sequenceNumber':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x00)
+      w.writeVarInt(2)
+      w.writeUInt16(event.number)
+      break;
+
+    case 'text':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x01)
+      w.writeVarInt(text.length)
+      w.writeString(text)
+      break;
+
+    case 'copyrightNotice':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x02)
+      w.writeVarInt(text.length)
+      w.writeString(text)
+      break;
+
+    case 'trackName':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x03)
+      w.writeVarInt(text.length)
+      w.writeString(text)
+      break;
+
+    case 'instrumentName':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x04)
+      w.writeVarInt(text.length)
+      w.writeString(text)
+      break;
+
+    case 'lyrics':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x05)
+      w.writeVarInt(text.length)
+      w.writeString(text)
+      break;
+
+    case 'marker':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x06)
+      w.writeVarInt(text.length)
+      w.writeString(text)
+      break;
+
+    case 'cuePoint':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x07)
+      w.writeVarInt(text.length)
+      w.writeString(text)
+      break;
+
+    case 'channelPrefix':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x20)
+      w.writeVarInt(1)
+      w.writeUInt8(event.channel)
+      break;
+
+    case 'portPrefix':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x21)
+      w.writeVarInt(1)
+      w.writeUInt8(event.port)
+      break;
+
+    case 'endOfTrack':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x2F)
+      w.writeVarInt(0)
+      break;
+
+    case 'setTempo':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x51)
+      w.writeVarInt(3)
+      w.writeUInt24(event.microsecondsPerBeat)
+      break;
+
+    case 'smpteOffset':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x54)
+      w.writeVarInt(5)
+      var FRAME_RATES = { 24: 0x00, 25: 0x20, 29: 0x40, 30: 0x60 }
+      var hourByte = (event.hour & 0x1F) | FRAME_RATES[event.frameRate]
+      w.writeUInt8(hourByte)
+      w.writeUInt8(event.min)
+      w.writeUInt8(event.sec)
+      w.writeUInt8(event.frame)
+      w.writeUInt8(event.subFrame)
+      break;
+
+    case 'timeSignature':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x58)
+      w.writeVarInt(4)
+      w.writeUInt8(event.numerator)
+      var denominator = Math.floor((Math.log(event.denominator) / Math.LN2)) & 0xFF
+      w.writeUInt8(denominator)
+      w.writeUInt8(event.metronome)
+      w.writeUInt8(event.thirtyseconds || 8)
+      break;
+
+    case 'keySignature':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x59)
+      w.writeVarInt(2)
+      w.writeInt8(event.key)
+      w.writeUInt8(event.scale)
+      break;
+
+    case 'sequencerSpecific':
+      w.writeUInt8(0xFF)
+      w.writeUInt8(0x7F)
+      w.writeVarInt(data.length)
+      w.writeBytes(data)
+      break;
+
+    case 'unknownMeta':
+      if (event.metatypeByte != null) {
+        w.writeUInt8(0xFF)
+        w.writeUInt8(event.metatypeByte)
+        w.writeVarInt(data.length)
+        w.writeBytes(data)
+      }
+      break;
+
+    // system-exclusive
+    case 'sysEx':
+      w.writeUInt8(0xF0)
+      w.writeVarInt(data.length)
+      w.writeBytes(data)
+      break;
+
+    case 'endSysEx':
+      w.writeUInt8(0xF7)
+      w.writeVarInt(data.length)
+      w.writeBytes(data)
+      break;
+
+    // channel events
+    case 'noteOff':
+      // Use 0x90 when opts.useByte9ForNoteOff is set and velocity is zero, or when event.byte9 is explicitly set on it.
+      // parseMidi will set event.byte9 for each event, so that we can get an exact copy by default.
+      // Explicitly set opts.useByte9ForNoteOff to false, to override event.byte9 and always use 0x80 for noteOff events.
+      var noteByte = ((useByte9ForNoteOff !== false && event.byte9) || (useByte9ForNoteOff && event.velocity == 0)) ? 0x90 : 0x80
+
+      eventTypeByte = noteByte | event.channel
+      if (eventTypeByte !== lastEventTypeByte) w.writeUInt8(eventTypeByte)
+      w.writeUInt8(event.noteNumber)
+      w.writeUInt8(event.velocity)
+      break;
+
+    case 'noteOn':
+      eventTypeByte = 0x90 | event.channel
+      if (eventTypeByte !== lastEventTypeByte) w.writeUInt8(eventTypeByte)
+      w.writeUInt8(event.noteNumber)
+      w.writeUInt8(event.velocity)
+      break;
+
+    case 'noteAftertouch':
+      eventTypeByte = 0xA0 | event.channel
+      if (eventTypeByte !== lastEventTypeByte) w.writeUInt8(eventTypeByte)
+      w.writeUInt8(event.noteNumber)
+      w.writeUInt8(event.amount)
+      break;
+
+    case 'controller':
+      eventTypeByte = 0xB0 | event.channel
+      if (eventTypeByte !== lastEventTypeByte) w.writeUInt8(eventTypeByte)
+      w.writeUInt8(event.controllerType)
+      w.writeUInt8(event.value)
+      break;
+
+    case 'programChange':
+      eventTypeByte = 0xC0 | event.channel
+      if (eventTypeByte !== lastEventTypeByte) w.writeUInt8(eventTypeByte)
+      w.writeUInt8(event.programNumber)
+      break;
+
+    case 'channelAftertouch':
+      eventTypeByte = 0xD0 | event.channel
+      if (eventTypeByte !== lastEventTypeByte) w.writeUInt8(eventTypeByte)
+      w.writeUInt8(event.amount)
+      break;
+
+    case 'pitchBend':
+      eventTypeByte = 0xE0 | event.channel
+      if (eventTypeByte !== lastEventTypeByte) w.writeUInt8(eventTypeByte)
+      var value14 = 0x2000 + event.value
+      var lsb14 = (value14 & 0x7F)
+      var msb14 = (value14 >> 7) & 0x7F
+      w.writeUInt8(lsb14)
+      w.writeUInt8(msb14)
+    break;
+
+    default:
+      throw 'Unrecognized event type: ' + type
+  }
+  return eventTypeByte
 }
 
-function letter (src) { return (parse(src) || {}).letter }
-function acc (src) { return (parse(src) || {}).acc }
-function pc (src) { return (parse(src) || {}).pc }
-function step (src) { return (parse(src) || {}).step }
-function alt (src) { return (parse(src) || {}).alt }
-function chroma (src) { return (parse(src) || {}).chroma }
-function oct (src) { return (parse(src) || {}).oct }
 
-
-/***/ }),
-
-/***/ "./node_modules/tonal-midi/index.js":
-/*!******************************************!*\
-  !*** ./node_modules/tonal-midi/index.js ***!
-  \******************************************/
-/***/ ((__unused_webpack_module, __webpack_exports__, __webpack_require__) => {
-
-"use strict";
-__webpack_require__.r(__webpack_exports__);
-/* harmony export */ __webpack_require__.d(__webpack_exports__, {
-/* harmony export */   note: () => (/* binding */ note),
-/* harmony export */   toMidi: () => (/* binding */ toMidi)
-/* harmony export */ });
-/* harmony import */ var note_parser__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! note-parser */ "./node_modules/note-parser/index.js");
-/**
- * A midi note number is a number representation of a note pitch. It can be
- * integers so it's equal tempered tuned, or float to indicate it's not
- * tuned into equal temepered scale.
- *
- * This module contains functions to convert to and from midi notes.
- *
- * @example
- * var midi = require('tonal-midi')
- * midi.toMidi('A4') // => 69
- * midi.note(69) // => 'A4'
- * midi.note(61) // => 'Db4'
- * midi.note(61, true) // => 'C#4'
- *
- * @module midi
- */
-
-
-
-/**
- * Convert the given note to a midi note number. If you pass a midi number it
- * will returned as is.
- *
- * @param {Array|String|Number} note - the note to get the midi number from
- * @return {Integer} the midi number or null if not valid pitch
- * @example
- * midi.toMidi('C4') // => 60
- * midi.toMidi(60) // => 60
- * midi.toMidi('60') // => 60
- */
-function toMidi (val) {
-  if (Array.isArray(val) && val.length === 2) return val[0] * 7 + val[1] * 12 + 12
-  return (0,note_parser__WEBPACK_IMPORTED_MODULE_0__.midi)(val)
+function Writer() {
+  this.buffer = []
 }
 
-var FLATS = 'C Db D Eb E F Gb G Ab A Bb B'.split(' ')
-var SHARPS = 'C C# D D# E F F# G G# A A# B'.split(' ')
-
-/**
- * Given a midi number, returns a note name. The altered notes will have
- * flats unless explicitly set with the optional `useSharps` parameter.
- *
- * @function
- * @param {Integer} midi - the midi note number
- * @param {Boolean} useSharps - (Optional) set to true to use sharps instead of flats
- * @return {String} the note name
- * @example
- * var midi = require('tonal-midi')
- * midi.note(61) // => 'Db4'
- * midi.note(61, true) // => 'C#4'
- * // it rounds to nearest note
- * midi.note(61.7) // => 'D4'
- */
-function note (num, sharps) {
-  if (num === true || num === false) return function (m) { return note(m, num) }
-  num = Math.round(num)
-  var pcs = sharps === true ? SHARPS : FLATS
-  var pc = pcs[num % 12]
-  var o = Math.floor(num / 12) - 1
-  return pc + o
+Writer.prototype.writeUInt8 = function(v) {
+  this.buffer.push(v & 0xFF)
 }
+Writer.prototype.writeInt8 = Writer.prototype.writeUInt8
+
+Writer.prototype.writeUInt16 = function(v) {
+  var b0 = (v >> 8) & 0xFF,
+      b1 = v & 0xFF
+
+  this.writeUInt8(b0)
+  this.writeUInt8(b1)
+}
+Writer.prototype.writeInt16 = Writer.prototype.writeUInt16
+
+Writer.prototype.writeUInt24 = function(v) {
+  var b0 = (v >> 16) & 0xFF,
+      b1 = (v >> 8) & 0xFF,
+      b2 = v & 0xFF
+
+  this.writeUInt8(b0)
+  this.writeUInt8(b1)
+  this.writeUInt8(b2)
+}
+Writer.prototype.writeInt24 = Writer.prototype.writeUInt24
+
+Writer.prototype.writeUInt32 = function(v) {
+  var b0 = (v >> 24) & 0xFF,
+      b1 = (v >> 16) & 0xFF,
+      b2 = (v >> 8) & 0xFF,
+      b3 = v & 0xFF
+
+  this.writeUInt8(b0)
+  this.writeUInt8(b1)
+  this.writeUInt8(b2)
+  this.writeUInt8(b3)
+}
+Writer.prototype.writeInt32 = Writer.prototype.writeUInt32
+
+
+Writer.prototype.writeBytes = function(arr) {
+  this.buffer = this.buffer.concat(Array.prototype.slice.call(arr, 0))
+}
+
+Writer.prototype.writeString = function(str) {
+  var i, len = str.length, arr = []
+  for (i=0; i < len; i++) {
+    arr.push(str.codePointAt(i))
+  }
+  this.writeBytes(arr)
+}
+
+Writer.prototype.writeVarInt = function(v) {
+  if (v < 0) throw "Cannot write negative variable-length integer"
+
+  if (v <= 0x7F) {
+    this.writeUInt8(v)
+  } else {
+    var i = v
+    var bytes = []
+    bytes.push(i & 0x7F)
+    i >>= 7
+    while (i) {
+      var b = i & 0x7F | 0x80
+      bytes.push(b)
+      i >>= 7
+    }
+    this.writeBytes(bytes.reverse())
+  }
+}
+
+Writer.prototype.writeChunk = function(id, data) {
+  this.writeString(id)
+  this.writeUInt32(data.length)
+  this.writeBytes(data)
+}
+
+module.exports = writeMidi
 
 
 /***/ })
@@ -14764,7 +15190,7 @@ function note (num, sharps) {
 /******/ 		};
 /******/ 	
 /******/ 		// Execute the module function
-/******/ 		__webpack_modules__[moduleId](module, module.exports, __webpack_require__);
+/******/ 		__webpack_modules__[moduleId].call(module.exports, module, module.exports, __webpack_require__);
 /******/ 	
 /******/ 		// Return the exports of the module
 /******/ 		return module.exports;
