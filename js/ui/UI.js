@@ -17,7 +17,7 @@ export class UI {
 			"only screen and (max-width: 1600px)"
 		).matches
 
-		this.midiRecrder = new MidiRecorder()
+		this.midiRecorder = new MidiRecorder()
 
 		this.songUI = new SongUI()
 		//add callbacks to the player
@@ -26,6 +26,7 @@ export class UI {
 		document.body.addEventListener("mousemove", this.mouseMoved.bind(this))
 
 		this.createControlMenu()
+		let hasActiveInput = false;
 
 		this.menuHeight = 200
 
@@ -752,6 +753,19 @@ export class UI {
 		return this.recordButton;
 	}
 	getRecordingDialog() {
+		if (this.inputDevicesDiv) {
+			let inputDevicesDivs = this.inputDevicesDiv.childNodes;
+
+			for (let i = 0; i < inputDevicesDivs.length; i++) {
+				if (inputDevicesDivs[i].classList.contains('selected')) {
+					this.hasActiveInput = true;
+					break;
+				}
+				else {
+					this.hasActiveInput = false;
+				}
+			}
+		}
 		if (!this.recordingDialog) {
 			this.recordingDialog = DomHelper.createDivWithIdAndClass(
 				"recordingDialog",
@@ -760,18 +774,27 @@ export class UI {
 			this.hideDiv(this.recordingDialog);
 			document.body.appendChild(this.recordingDialog);
 
+			this.recordingDialog.innerHTML = ''; // clear the recording dialog
+
 			let text = DomHelper.createDivWithClass(
 				"centeredBigText",
 				{ marginTop: "25px" },
 				{ innerHTML: "Recording Controls:" }
 			);
 			this.recordingDialog.appendChild(text);
-
-			let recordingControls = this.getRecordingControls.bind(this)();
-			recordingControls.forEach(control => {
-				this.recordingDialog.appendChild(control);
-			});
-
+			if (this.hasActiveInput) {
+				let recordingControls = this.getRecordingControls.bind(this)();
+				recordingControls.forEach(control => {
+					this.recordingDialog.appendChild(control);
+				});
+			} else {
+				let noInputText = DomHelper.createDivWithClass(
+					"centeredBigText",
+					{ marginTop: "25px" },
+					{ innerHTML: "No MIDI input device selected" }
+				);
+				this.recordingDialog.appendChild(noInputText);
+			}
 		}
 		this.recordingDialog.style.marginTop =
 			this.getNavBar().clientHeight + 25 + "px";
@@ -919,6 +942,7 @@ export class UI {
 		);
 		startRecordingButton.classList.add("recordingControl");
 
+		// Hide these buttons initially
 		let pauseRecordingButton = DomHelper.createGlyphiconTextButton(
 			"pauseRecording",
 			"pause",
@@ -926,6 +950,8 @@ export class UI {
 			this.pauseRecording.bind(this)
 		);
 		pauseRecordingButton.classList.add("recordingControl");
+		pauseRecordingButton.style.display = "none";
+
 		let clearRecordingButton = DomHelper.createGlyphiconTextButton(
 			"clearRecording",
 			"remove",
@@ -933,6 +959,7 @@ export class UI {
 			this.clearRecording.bind(this)
 		);
 		clearRecordingButton.classList.add("recordingControl");
+		clearRecordingButton.style.display = "none";
 
 		let saveRecordingButton = DomHelper.createGlyphiconTextButton(
 			"saveRecording",
@@ -941,24 +968,69 @@ export class UI {
 			this.saveRecording.bind(this)
 		);
 		saveRecordingButton.classList.add("recordingControl");
+		saveRecordingButton.style.display = "none";
 
-		return [startRecordingButton, pauseRecordingButton, clearRecordingButton, saveRecordingButton];
+		// Timer for visualizing the recording
+		let timer = document.createElement("span");
+		timer.id = "recordingTimer";
+		timer.innerHTML = "00:00:00";
+
+		// Red record symbol
+		let recordSymbol = document.createElement("span");
+		recordSymbol.id = "recordSymbol";
+		recordSymbol.innerHTML = "&#9679;";
+		recordSymbol.style.color = "red";
+		recordSymbol.style.display = "none";
+
+		// If a MIDI input has been selected, show the "Start Recording" button
+		// Otherwise, show a message asking the user to select an input device
+		if (this.hasActiveInput) {
+			return [
+				startRecordingButton,
+				pauseRecordingButton,
+				clearRecordingButton,
+				saveRecordingButton,
+				timer,
+				recordSymbol
+			];
+		} else {
+			let message = document.createElement("p");
+			message.innerHTML = "Please select a MIDI input device in the MIDI setup.";
+			return [message];
+		}
 	}
 
 	startRecording() {
-		this.midiRecrder.startRecording();
+		if (this.hasActiveInput) {
+			this.midiRecorder.startRecording();
+
+			// Show the timer and the red record symbol
+			document.getElementById("recordingTimer").style.display = "inline";
+			document.getElementById("recordSymbol").style.display = "inline";
+
+			// Make the other buttons visible
+			document.getElementById("pauseRecording").style.display = "inline";
+			document.getElementById("clearRecording").style.display = "inline";
+			document.getElementById("saveRecording").style.display = "inline";
+		}
+	}
+
+	// Modify the clearRecording method
+	clearRecording() {
+		this.midiRecorder.clearRecording();
+
+		// Reset the timer and hide the other buttons
+		document.getElementById("recordingTimer").innerHTML = "00:00:00";
+		document.getElementById("pauseRecording").style.display = "none";
+		document.getElementById("saveRecording").style.display = "none";
 	}
 
 	pauseRecording() {
-		this.midiRecrder.pauseRecording();
-	}
-
-	clearRecording() {
-		this.midiRecrder.clearRecording();
+		this.midiRecorder.pauseRecording();
 	}
 
 	async saveRecording() {
-		await this.midiRecrder.saveRecording();
+		await this.midiRecorder.saveRecording();
 	}
 
 }

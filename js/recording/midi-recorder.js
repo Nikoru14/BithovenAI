@@ -6,12 +6,14 @@ class MidiRecorder {
         this.midi = new Midi();
         this.track = this.midi.addTrack();
         this.startTime = null;
+        this.totalTime = 0;
         this.notesOn = {};
+        this.firstNotePlayed = false;
     }
 
     async startRecording() {
         this.recording = true;
-        this.startTime = Date.now();
+        this.firstNotePlayed = false;  // Set to false when starting a new recording
         let midiAccess = await navigator.requestMIDIAccess();
 
         console.log("MIDI access granted. Enumerating inputs...");
@@ -29,11 +31,18 @@ class MidiRecorder {
 
     pauseRecording() {
         this.recording = false;
+        // If we are pausing, calculate the total time recorded so far
+        if (this.startTime !== null) {
+            this.totalTime += (Date.now() - this.startTime) / 1000;
+            this.startTime = null;
+        }
     }
 
     clearRecording() {
         this.midi = new Midi();
         this.track = this.midi.addTrack();
+        this.startTime = null;
+        this.firstNotePlayed = false;  // Set to false when clearing the recording
     }
 
     async saveRecording() {
@@ -47,18 +56,23 @@ class MidiRecorder {
 
     handleMIDIMessage(event) {
         console.log('Received MIDI message', event.data);
-        if (!this.recording) return;
+        if (!this.recording || !this.firstNotePlayed && event.data[2] === 0) return;
         console.log('Recording is active');
         let [status, noteNumber, velocity] = event.data;
         let messageType = status & 0xF0;
-        let deltaTime = (Date.now() - this.startTime) / 1000;  // convert to seconds
         if (messageType === 0x90 && velocity > 0) {  // note on
+            // If this is the first note, set the start time
+            if (this.startTime === null) {
+                this.startTime = Date.now();
+                this.firstNotePlayed = true;
+            }
+            let deltaTime = this.totalTime + (Date.now() - this.startTime) / 1000;
             this.notesOn[noteNumber] = deltaTime;
             console.log('Note on message received');
         } else if ((messageType === 0x80) || (messageType === 0x90 && velocity === 0)) {  // note off
             let noteOnTime = this.notesOn[noteNumber];
             if (noteOnTime !== undefined) {
-                let duration = deltaTime - noteOnTime;
+                let duration = ((Date.now() - this.startTime) / 1000) - noteOnTime;
                 let channel = status & 0x0F;
                 try {
                     this.track.addNote({

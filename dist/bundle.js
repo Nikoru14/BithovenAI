@@ -6920,12 +6920,14 @@ class MidiRecorder {
         this.midi = new _tonejs_midi__WEBPACK_IMPORTED_MODULE_0__.Midi();
         this.track = this.midi.addTrack();
         this.startTime = null;
+        this.totalTime = 0;
         this.notesOn = {};
+        this.firstNotePlayed = false;
     }
 
     async startRecording() {
         this.recording = true;
-        this.startTime = Date.now();
+        this.firstNotePlayed = false;  // Set to false when starting a new recording
         let midiAccess = await navigator.requestMIDIAccess();
 
         console.log("MIDI access granted. Enumerating inputs...");
@@ -6943,11 +6945,18 @@ class MidiRecorder {
 
     pauseRecording() {
         this.recording = false;
+        // If we are pausing, calculate the total time recorded so far
+        if (this.startTime !== null) {
+            this.totalTime += (Date.now() - this.startTime) / 1000;
+            this.startTime = null;
+        }
     }
 
     clearRecording() {
         this.midi = new _tonejs_midi__WEBPACK_IMPORTED_MODULE_0__.Midi();
         this.track = this.midi.addTrack();
+        this.startTime = null;
+        this.firstNotePlayed = false;  // Set to false when clearing the recording
     }
 
     async saveRecording() {
@@ -6961,18 +6970,23 @@ class MidiRecorder {
 
     handleMIDIMessage(event) {
         console.log('Received MIDI message', event.data);
-        if (!this.recording) return;
+        if (!this.recording || !this.firstNotePlayed && event.data[2] === 0) return;
         console.log('Recording is active');
         let [status, noteNumber, velocity] = event.data;
         let messageType = status & 0xF0;
-        let deltaTime = (Date.now() - this.startTime) / 1000;  // convert to seconds
         if (messageType === 0x90 && velocity > 0) {  // note on
+            // If this is the first note, set the start time
+            if (this.startTime === null) {
+                this.startTime = Date.now();
+                this.firstNotePlayed = true;
+            }
+            let deltaTime = this.totalTime + (Date.now() - this.startTime) / 1000;
             this.notesOn[noteNumber] = deltaTime;
             console.log('Note on message received');
         } else if ((messageType === 0x80) || (messageType === 0x90 && velocity === 0)) {  // note off
             let noteOnTime = this.notesOn[noteNumber];
             if (noteOnTime !== undefined) {
-                let duration = deltaTime - noteOnTime;
+                let duration = ((Date.now() - this.startTime) / 1000) - noteOnTime;
                 let channel = status & 0x0F;
                 try {
                     this.track.addNote({
@@ -8863,7 +8877,7 @@ class UI {
 			"only screen and (max-width: 1600px)"
 		).matches
 
-		this.midiRecrder = new _recording_midi_recorder_js__WEBPACK_IMPORTED_MODULE_7__["default"]()
+		this.midiRecorder = new _recording_midi_recorder_js__WEBPACK_IMPORTED_MODULE_7__["default"]()
 
 		this.songUI = new _SongUI_js__WEBPACK_IMPORTED_MODULE_5__.SongUI()
 		//add callbacks to the player
@@ -8872,6 +8886,7 @@ class UI {
 		document.body.addEventListener("mousemove", this.mouseMoved.bind(this))
 
 		this.createControlMenu()
+		let hasActiveInput = false;
 
 		this.menuHeight = 200
 
@@ -9598,6 +9613,19 @@ class UI {
 		return this.recordButton;
 	}
 	getRecordingDialog() {
+		if (this.inputDevicesDiv) {
+			let inputDevicesDivs = this.inputDevicesDiv.childNodes;
+
+			for (let i = 0; i < inputDevicesDivs.length; i++) {
+				if (inputDevicesDivs[i].classList.contains('selected')) {
+					this.hasActiveInput = true;
+					break;
+				}
+				else {
+					this.hasActiveInput = false;
+				}
+			}
+		}
 		if (!this.recordingDialog) {
 			this.recordingDialog = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createDivWithIdAndClass(
 				"recordingDialog",
@@ -9606,18 +9634,27 @@ class UI {
 			this.hideDiv(this.recordingDialog);
 			document.body.appendChild(this.recordingDialog);
 
+			this.recordingDialog.innerHTML = ''; // clear the recording dialog
+
 			let text = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createDivWithClass(
 				"centeredBigText",
 				{ marginTop: "25px" },
 				{ innerHTML: "Recording Controls:" }
 			);
 			this.recordingDialog.appendChild(text);
-
-			let recordingControls = this.getRecordingControls.bind(this)();
-			recordingControls.forEach(control => {
-				this.recordingDialog.appendChild(control);
-			});
-
+			if (this.hasActiveInput) {
+				let recordingControls = this.getRecordingControls.bind(this)();
+				recordingControls.forEach(control => {
+					this.recordingDialog.appendChild(control);
+				});
+			} else {
+				let noInputText = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createDivWithClass(
+					"centeredBigText",
+					{ marginTop: "25px" },
+					{ innerHTML: "No MIDI input device selected" }
+				);
+				this.recordingDialog.appendChild(noInputText);
+			}
 		}
 		this.recordingDialog.style.marginTop =
 			this.getNavBar().clientHeight + 25 + "px";
@@ -9765,6 +9802,7 @@ class UI {
 		);
 		startRecordingButton.classList.add("recordingControl");
 
+		// Hide these buttons initially
 		let pauseRecordingButton = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createGlyphiconTextButton(
 			"pauseRecording",
 			"pause",
@@ -9772,6 +9810,8 @@ class UI {
 			this.pauseRecording.bind(this)
 		);
 		pauseRecordingButton.classList.add("recordingControl");
+		pauseRecordingButton.style.display = "none";
+
 		let clearRecordingButton = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createGlyphiconTextButton(
 			"clearRecording",
 			"remove",
@@ -9779,6 +9819,7 @@ class UI {
 			this.clearRecording.bind(this)
 		);
 		clearRecordingButton.classList.add("recordingControl");
+		clearRecordingButton.style.display = "none";
 
 		let saveRecordingButton = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createGlyphiconTextButton(
 			"saveRecording",
@@ -9787,24 +9828,69 @@ class UI {
 			this.saveRecording.bind(this)
 		);
 		saveRecordingButton.classList.add("recordingControl");
+		saveRecordingButton.style.display = "none";
 
-		return [startRecordingButton, pauseRecordingButton, clearRecordingButton, saveRecordingButton];
+		// Timer for visualizing the recording
+		let timer = document.createElement("span");
+		timer.id = "recordingTimer";
+		timer.innerHTML = "00:00:00";
+
+		// Red record symbol
+		let recordSymbol = document.createElement("span");
+		recordSymbol.id = "recordSymbol";
+		recordSymbol.innerHTML = "&#9679;";
+		recordSymbol.style.color = "red";
+		recordSymbol.style.display = "none";
+
+		// If a MIDI input has been selected, show the "Start Recording" button
+		// Otherwise, show a message asking the user to select an input device
+		if (this.hasActiveInput) {
+			return [
+				startRecordingButton,
+				pauseRecordingButton,
+				clearRecordingButton,
+				saveRecordingButton,
+				timer,
+				recordSymbol
+			];
+		} else {
+			let message = document.createElement("p");
+			message.innerHTML = "Please select a MIDI input device in the MIDI setup.";
+			return [message];
+		}
 	}
 
 	startRecording() {
-		this.midiRecrder.startRecording();
+		if (this.hasActiveInput) {
+			this.midiRecorder.startRecording();
+
+			// Show the timer and the red record symbol
+			document.getElementById("recordingTimer").style.display = "inline";
+			document.getElementById("recordSymbol").style.display = "inline";
+
+			// Make the other buttons visible
+			document.getElementById("pauseRecording").style.display = "inline";
+			document.getElementById("clearRecording").style.display = "inline";
+			document.getElementById("saveRecording").style.display = "inline";
+		}
+	}
+
+	// Modify the clearRecording method
+	clearRecording() {
+		this.midiRecorder.clearRecording();
+
+		// Reset the timer and hide the other buttons
+		document.getElementById("recordingTimer").innerHTML = "00:00:00";
+		document.getElementById("pauseRecording").style.display = "none";
+		document.getElementById("saveRecording").style.display = "none";
 	}
 
 	pauseRecording() {
-		this.midiRecrder.pauseRecording();
-	}
-
-	clearRecording() {
-		this.midiRecrder.clearRecording();
+		this.midiRecorder.pauseRecording();
 	}
 
 	async saveRecording() {
-		await this.midiRecrder.saveRecording();
+		await this.midiRecorder.saveRecording();
 	}
 
 }
