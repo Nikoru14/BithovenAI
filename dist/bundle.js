@@ -6912,6 +6912,9 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */ });
 /* harmony import */ var _tonejs_midi__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! @tonejs/midi */ "./node_modules/@tonejs/midi/dist/Midi.js");
 /* harmony import */ var _tonejs_midi__WEBPACK_IMPORTED_MODULE_0___default = /*#__PURE__*/__webpack_require__.n(_tonejs_midi__WEBPACK_IMPORTED_MODULE_0__);
+/* harmony import */ var localforage__WEBPACK_IMPORTED_MODULE_1__ = __webpack_require__(/*! localforage */ "./node_modules/localforage/dist/localforage.js");
+/* harmony import */ var localforage__WEBPACK_IMPORTED_MODULE_1___default = /*#__PURE__*/__webpack_require__.n(localforage__WEBPACK_IMPORTED_MODULE_1__);
+
 
 
 class MidiRecorder {
@@ -6953,10 +6956,11 @@ class MidiRecorder {
     }
 
     clearRecording() {
+        this.recording = false;  // Set to false when clearing the recording
         this.midi = new _tonejs_midi__WEBPACK_IMPORTED_MODULE_0__.Midi();
         this.track = this.midi.addTrack();
         this.startTime = null;
-        this.firstNotePlayed = false;  // Set to false when clearing the recording
+        this.firstNotePlayed = false;
     }
 
     async saveRecording() {
@@ -6966,6 +6970,10 @@ class MidiRecorder {
         let filename = "recording-" + new Date().toISOString() + ".mid";
         saveAs(blob, filename);
         return filename;
+    }
+
+    isFirstNotePlayed() {
+        return this.firstNotePlayed;
     }
 
     handleMIDIMessage(event) {
@@ -8877,6 +8885,8 @@ class UI {
 			"only screen and (max-width: 1600px)"
 		).matches
 
+		this.timerInterval = null;
+
 		this.midiRecorder = new _recording_midi_recorder_js__WEBPACK_IMPORTED_MODULE_7__["default"]()
 
 		this.songUI = new _SongUI_js__WEBPACK_IMPORTED_MODULE_5__.SongUI()
@@ -8929,6 +8939,7 @@ class UI {
 		let fileGrp = this.getFileButtonGroup()
 		let songSpeedGrp = this.getSpeedButtonGroup()
 		let songControlGrp = this.getSongControlButtonGroup()
+		let generteMelodyGrp = this.getGenerateMelodyButton()
 		let volumeGrp = this.getVolumneButtonGroup()
 		let settingsGrpRight = this.getSettingsButtonGroup()
 		let trackGrp = this.getTracksButtonGroup()
@@ -8946,7 +8957,7 @@ class UI {
 		let rightTop = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createElementWithClass("topContainer")
 
 		_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.appendChildren(leftTop, [fileGrp, trackGrp])
-		_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.appendChildren(middleTop, [songControlGrp])
+		_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.appendChildren(middleTop, [songControlGrp, generteMelodyGrp])
 		_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.appendChildren(rightTop, [
 			songSpeedGrp,
 			volumeGrp,
@@ -9612,20 +9623,26 @@ class UI {
 		}
 		return this.recordButton;
 	}
-	getRecordingDialog() {
-		if (this.inputDevicesDiv) {
-			let inputDevicesDivs = this.inputDevicesDiv.childNodes;
 
-			for (let i = 0; i < inputDevicesDivs.length; i++) {
-				if (inputDevicesDivs[i].classList.contains('selected')) {
-					this.hasActiveInput = true;
-					break;
-				}
-				else {
-					this.hasActiveInput = false;
-				}
-			}
+	getGenerateMelodyButton() {
+		if (!this.generateMelodyButton) {
+			this.generateMelodyButton = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createGlyphiconTextButton(
+				"generateMelody",
+				"music", // Assuming the glyph icon for music is "music"
+				"Generate Melody",
+				this.clickGenerateMelody.bind(this)
+			);
+			_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.addClassToElement("floatSpanLeft", this.generateMelodyButton);
 		}
+		return this.generateMelodyButton;
+	}
+
+	clickGenerateMelody(ev) {
+		this.clickStop();
+		console.log("Generating melody...");
+	}
+
+	getRecordingDialog() {
 		if (!this.recordingDialog) {
 			this.recordingDialog = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createDivWithIdAndClass(
 				"recordingDialog",
@@ -9661,16 +9678,34 @@ class UI {
 		return this.recordingDialog;
 	}
 
+	checkMIDIInput() {
+		if (this.inputDevicesDiv) {
+			let inputDevicesDivs = this.inputDevicesDiv.childNodes;
+
+			for (let i = 0; i < inputDevicesDivs.length; i++) {
+				if (inputDevicesDivs[i].classList.contains('selected')) {
+					this.hasActiveInput = true;
+					break;
+				}
+				else {
+					this.hasActiveInput = false;
+				}
+			}
+		}
+	}
+
 	clickRecord(ev) {
+		this.checkMIDIInput();
 		if (this.recordingDialogShown) {
 			this.hideDiv(this.getRecordingDialog());
-			_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.removeClass("selected", this.recordButton)
+			_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.removeClass("selected", this.recordButton);
 			this.recordingDialogShown = false;
 		} else {
 			this.showDiv(this.getRecordingDialog());
-			_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.addClassToElement("selected", this.recordButton)
+			_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.addClassToElement("selected", this.recordButton);
 			this.recordingDialogShown = true;
 		}
+		this.updateRecordingControls(); // Update recording controls when record button is clicked
 	}
 
 	resetTrackMenuDiv() {
@@ -9740,19 +9775,20 @@ class UI {
 			device.name,
 			() => {
 				if (deviceDiv.classList.contains("selected")) {
-					_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.removeClass("selected", deviceDiv)
-					;(0,_MidiInputHandler_js__WEBPACK_IMPORTED_MODULE_6__.getMidiHandler)().clearInput(device)
+					_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.removeClass("selected", deviceDiv);
+					(0,_MidiInputHandler_js__WEBPACK_IMPORTED_MODULE_6__.getMidiHandler)().clearInput(device);
 				} else {
-					_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.addClassToElement("selected", deviceDiv)
-					;(0,_MidiInputHandler_js__WEBPACK_IMPORTED_MODULE_6__.getMidiHandler)().addInput(device)
+					_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.addClassToElement("selected", deviceDiv);
+					(0,_MidiInputHandler_js__WEBPACK_IMPORTED_MODULE_6__.getMidiHandler)().addInput(device);
 				}
+				this.updateRecordingControls(); // Update recording controls when MIDI device is selected
 			}
-		)
+		);
 		if ((0,_MidiInputHandler_js__WEBPACK_IMPORTED_MODULE_6__.getMidiHandler)().isDeviceActive(device)) {
-			_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.addClassToElement("selected", deviceDiv)
+			_DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.addClassToElement("selected", deviceDiv);
 		}
 
-		return deviceDiv
+		return deviceDiv;
 	}
 	createOutputDeviceDiv(device) {
 		let deviceDiv = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createTextButton(
@@ -9860,13 +9896,58 @@ class UI {
 		}
 	}
 
+	updateRecordingControls() {
+		// Logic to show/hide recording controls based on the selected MIDI device
+		if (this.hasActiveInput) {
+			// Show recording controls if a MIDI device is selected
+			this.getRecordingDialog().innerHTML = ''; // clear the recording dialog
+
+			this.recordingDialog.innerHTML = ''; // clear the recording dialog
+
+			let text = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createDivWithClass(
+				"centeredBigText",
+				{ marginTop: "25px" },
+				{ innerHTML: "Recording Controls:" }
+			);
+			this.getRecordingDialog().appendChild(text);
+
+			let recordingControls = this.getRecordingControls.bind(this)();
+			recordingControls.forEach(control => {
+				this.getRecordingDialog().appendChild(control);
+			});
+		} else {
+			this.recordingDialog.innerHTML = ''; // clear the recording dialog
+
+			let text = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createDivWithClass(
+				"centeredBigText",
+				{ marginTop: "25px" },
+				{ innerHTML: "Recording Controls:" }
+			);
+			this.getRecordingDialog().appendChild(text);
+
+			let noInputText = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createDivWithClass(
+				"centeredBigText",
+				{ marginTop: "25px" },
+				{ innerHTML: "No MIDI input device selected" }
+			);
+			this.getRecordingDialog().appendChild(noInputText);
+		}
+	}
+
 	startRecording() {
 		if (this.hasActiveInput) {
+			this.clickStop()
 			this.midiRecorder.startRecording();
 
 			// Show the timer and the red record symbol
 			document.getElementById("recordingTimer").style.display = "inline";
 			document.getElementById("recordSymbol").style.display = "inline";
+
+			const checkInterval = setInterval(() => {
+				if (this.checkAndStartTimer()) {
+					clearInterval(checkInterval);
+				}
+			}, 100);
 
 			// Make the other buttons visible
 			document.getElementById("pauseRecording").style.display = "inline";
@@ -9875,10 +9956,32 @@ class UI {
 		}
 	}
 
-	// Modify the clearRecording method
+	startTimer() {
+		this.timerStartTime = Date.now();
+		this.timerInterval = setInterval(this.updateTimerDisplay.bind(this), 1000);
+	}
+
+	checkAndStartTimer() {
+		if (this.midiRecorder.isFirstNotePlayed() && !this.timerInterval) {
+			this.startTimer();
+			return true;
+		}
+		return false;
+	}
+
+	updateTimerDisplay() {
+		const elapsedSeconds = Math.floor((Date.now() - this.timerStartTime) / 1000);
+		const hours = String(Math.floor(elapsedSeconds / 3600)).padStart(2, '0');
+		const minutes = String(Math.floor((elapsedSeconds % 3600) / 60)).padStart(2, '0');
+		const seconds = String(elapsedSeconds % 60).padStart(2, '0');
+		document.getElementById("recordingTimer").innerHTML = `${hours}:${minutes}:${seconds}`;
+	}
+
 	clearRecording() {
 		this.midiRecorder.clearRecording();
-
+		clearInterval(this.timerInterval);
+		this.timerInterval = null;
+		document.getElementById("recordSymbol").style.display = "none";
 		// Reset the timer and hide the other buttons
 		document.getElementById("recordingTimer").innerHTML = "00:00:00";
 		document.getElementById("pauseRecording").style.display = "none";
@@ -9887,6 +9990,8 @@ class UI {
 
 	pauseRecording() {
 		this.midiRecorder.pauseRecording();
+		clearInterval(this.timerInterval);
+		this.timerInterval = null; // Pause the timer
 	}
 
 	async saveRecording() {

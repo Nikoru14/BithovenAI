@@ -1,4 +1,5 @@
 import { Midi, Track, Note } from '@tonejs/midi';
+import localforage from 'localforage';
 
 class MidiRecorder {
     constructor() {
@@ -39,10 +40,11 @@ class MidiRecorder {
     }
 
     clearRecording() {
+        this.recording = false;  // Set to false when clearing the recording
         this.midi = new Midi();
         this.track = this.midi.addTrack();
         this.startTime = null;
-        this.firstNotePlayed = false;  // Set to false when clearing the recording
+        this.firstNotePlayed = false;
     }
 
     async saveRecording() {
@@ -52,6 +54,10 @@ class MidiRecorder {
         let filename = "recording-" + new Date().toISOString() + ".mid";
         saveAs(blob, filename);
         return filename;
+    }
+
+    isFirstNotePlayed() {
+        return this.firstNotePlayed;
     }
 
     handleMIDIMessage(event) {
