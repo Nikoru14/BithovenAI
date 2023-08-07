@@ -4361,6 +4361,9 @@ class Song {
 		channels[9].instrument = -1
 		return channels
 	}
+	getSongFilename() {
+		return this.fileName;
+	}
 }
 
 
@@ -6244,6 +6247,7 @@ __webpack_require__.r(__webpack_exports__);
 /* harmony export */   getCurrentSong: () => (/* binding */ getCurrentSong),
 /* harmony export */   getPlayer: () => (/* binding */ getPlayer),
 /* harmony export */   getPlayerState: () => (/* binding */ getPlayerState),
+/* harmony export */   getSongFilename: () => (/* binding */ getSongFilename),
 /* harmony export */   pianoNotes: () => (/* binding */ pianoNotes)
 /* harmony export */ });
 /* harmony import */ var _MidiLoader_js__WEBPACK_IMPORTED_MODULE_0__ = __webpack_require__(/*! ../MidiLoader.js */ "./js/MidiLoader.js");
@@ -6278,6 +6282,8 @@ class Player {
 
 		;(0,_MidiInputHandler_js__WEBPACK_IMPORTED_MODULE_5__.getMidiHandler)().setNoteOnCallback(this.addInputNoteOn.bind(this))
 		;(0,_MidiInputHandler_js__WEBPACK_IMPORTED_MODULE_5__.getMidiHandler)().setNoteOffCallback(this.addInputNoteOff.bind(this))
+
+		this.songFilename = ""
 
 		this.startDelay = -2.5
 		this.lastTime = this.audioPlayer.getContextTime()
@@ -6373,33 +6379,35 @@ class Player {
 	}
 
 	async loadSong(theSong, fileName, name) {
-		this.audioPlayer.stopAllSources()
-		;(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().startLoad()
-		;(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().setLoadMessage("Loading " + fileName + ".")
+		this.audioPlayer.stopAllSources();
+		(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().startLoad();
+		(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().setLoadMessage("Loading " + fileName + ".");
 		if (this.audioPlayer.isRunning()) {
-			this.audioPlayer.suspend()
+			this.audioPlayer.suspend();
 		}
 
-		this.loading = true
+		this.loading = true;
 
-		;(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().setLoadMessage("Parsing Midi File.")
+		(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().setLoadMessage("Parsing Midi File.");
 		try {
-			let midiFile = await _MidiLoader_js__WEBPACK_IMPORTED_MODULE_0__.MidiLoader.loadFile(theSong)
-			this.setSong(new _Song_js__WEBPACK_IMPORTED_MODULE_1__.Song(midiFile, fileName, name))
-			;(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().setLoadMessage("Loading Instruments")
+			let midiFile = await _MidiLoader_js__WEBPACK_IMPORTED_MODULE_0__.MidiLoader.loadFile(theSong);
+			this.setSong(new _Song_js__WEBPACK_IMPORTED_MODULE_1__.Song(midiFile, fileName, name));
+			(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().setLoadMessage("Loading Instruments");
 
-			await this.audioPlayer.loadInstrumentsForSong(this.song)
+			this.songFilename = fileName;
+			await this.audioPlayer.loadInstrumentsForSong(this.song);
 
-			;(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().setLoadMessage("Creating Buffers")
-			return this.audioPlayer.loadBuffers().then(v => (0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().stopLoad())
+			(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().setLoadMessage("Creating Buffers");
+			return this.audioPlayer.loadBuffers().then(v => (0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().stopLoad());
 		} catch (error) {
 			console.log(error)
-			_ui_Notification_js__WEBPACK_IMPORTED_MODULE_8__.Notification.create("Couldn't read Midi-File - " + error, 2000)
-			;(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().stopLoad()
+			_ui_Notification_js__WEBPACK_IMPORTED_MODULE_8__.Notification.create("Couldn't read Midi-File - " + error, 2000);
+			(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().stopLoad();
 		}
 	}
 
-	async loadFromRecording(fileName, name) {
+	async loadFromRecording(fileName) {
+		let name = fileName;
 		this.audioPlayer.stopAllSources();
 		(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().startLoad();
 		(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().setLoadMessage("Loading " + fileName + ".");
@@ -6414,7 +6422,10 @@ class Player {
 
 		try {
 			// Retrieve the MIDI file from localforage
+
 			let theSongBlob = await localforage__WEBPACK_IMPORTED_MODULE_9___default().getItem(fileName);
+			console.log(theSongBlob);
+
 
 			if (theSongBlob == null) {
 				throw new Error("No file found with the name " + fileName);
@@ -6428,6 +6439,7 @@ class Player {
 			// Pass URL to MidiLoader.loadFile
 			let midiFile = await _MidiLoader_js__WEBPACK_IMPORTED_MODULE_0__.MidiLoader.loadFile(theSongURL);
 			this.setSong(new _Song_js__WEBPACK_IMPORTED_MODULE_1__.Song(midiFile, fileName, name));
+			this.songFilename = fileName;
 			(0,_ui_Loader_js__WEBPACK_IMPORTED_MODULE_3__.getLoader)().setLoadMessage("Loading Instruments");
 
 			await this.audioPlayer.loadInstrumentsForSong(this.song);
@@ -6787,6 +6799,9 @@ const getCurrentSong = () => {
 	return thePlayer.song
 }
 
+const getSongFilename = () => {
+	return thePlayer.song.getSongFilename()
+}
 const getPlayerState = () => {
 	return thePlayer.getState()
 }
@@ -6923,14 +6938,28 @@ class MidiRecorder {
         this.midi = new _tonejs_midi__WEBPACK_IMPORTED_MODULE_0__.Midi();
         this.track = this.midi.addTrack();
         this.startTime = null;
+        this.pauseTime = null;
         this.totalTime = 0;
+        this.currentTrack = null;
+        this.totalPauseDuration = 0;  // Add this to track total pause time
         this.notesOn = {};
         this.firstNotePlayed = false;
+        this.recordedTracks = [];
+        this.tracks = [];
     }
 
     async startRecording() {
+        if (this.recording) {
+            console.log("Already recording.");
+            return;
+        }
+
         this.recording = true;
+
+        // Start a new track
+        this.currentTrack = this.midi.addTrack();
         this.firstNotePlayed = false;  // Set to false when starting a new recording
+
         let midiAccess = await navigator.requestMIDIAccess();
 
         console.log("MIDI access granted. Enumerating inputs...");
@@ -6948,29 +6977,120 @@ class MidiRecorder {
 
     pauseRecording() {
         this.recording = false;
-        // If we are pausing, calculate the total time recorded so far
+        // If we are pausing, calculate the total time recorded so far and save the pause time
         if (this.startTime !== null) {
             this.totalTime += (Date.now() - this.startTime) / 1000;
+            this.pauseTime = Date.now();
             this.startTime = null;
         }
+        // Complete any notes that are currently playing
+        for (let noteNumber in this.notesOn) {
+            if (this.notesOn.hasOwnProperty(noteNumber)) {
+                let noteOnData = this.notesOn[noteNumber];
+                let noteOnTime = noteOnData.deltaTime;
+                let noteOffTime = (Date.now() - this.startTime) / 1000 - this.totalPauseDuration;
+                let duration = noteOffTime - noteOnTime;
+
+                // Ensure duration is not negative
+                if (duration < 0) {
+                    console.error(`Negative duration for note ${noteNumber}: ${duration}`);
+                    duration = 0;
+                }
+
+                try {
+                    this.track.addNote({
+                        midi: noteNumber,
+                        time: Math.max(noteOnTime, 0),  // Ensure time is not negative
+                        duration: duration,
+                        velocity: 127 / 127,  // Use a default velocity for completed notes
+                        channel: 0,  // Use a default channel for completed notes
+                    });
+                    console.log('Note completed on pause');
+                } catch (error) {
+                    console.log('Error adding note to track:', error);
+                }
+
+                delete this.notesOn[noteNumber];
+            }
+        }
+        // Add current track to the list of tracks and reset the current track
+        this.recordedTracks.push(this.track);
+        this.track = this.midi.addTrack();
     }
+
 
     clearRecording() {
         this.recording = false;  // Set to false when clearing the recording
         this.midi = new _tonejs_midi__WEBPACK_IMPORTED_MODULE_0__.Midi();
         this.track = this.midi.addTrack();
         this.startTime = null;
+        this.totalTime = 0;
+        this.pauseTime = 0;
+        this.currentTrack = null;
+        this.tracks = [];
+        this.recordedTracks = [];
+        this.notesOn = {};
+        this.totalPauseDuration = 0;
         this.firstNotePlayed = false;
     }
 
-    async saveRecording() {
+    async saveRecording(key) {
         this.recording = false;
-        let data = this.midi.toArray();
+        try {
+            let data = await localforage__WEBPACK_IMPORTED_MODULE_1___default().getItem(key);
+            let filename = key;
+            await saveAs(data, filename);
+            return filename;
+        } catch (err) {
+            console.log("Error to local storage:", err);
+            return null;
+        }
+    }
+
+    async saveRecordingToLocalStorage() {
+        if (this.recording) {
+            this.pauseRecording();
+            this.recording = false;
+        }
+        // Create a new Midi instance to combine all the tracks
+        let finalMidi = new _tonejs_midi__WEBPACK_IMPORTED_MODULE_0__.Midi();
+
+        let totalTime = 0;  // Keep track of the total time of all tracks
+
+        for (let track of this.recordedTracks) {
+            let finalTrack = finalMidi.addTrack();
+            for (let note of track.notes) {
+                // Adjust the note time by the total time of all previous tracks
+                let adjustedNote = {
+                    ...note,
+                    time: note.time + totalTime,
+                };
+                finalTrack.addNote(adjustedNote);
+            }
+            // Update the total time for the next track
+            totalTime += track.duration;
+        }
+
+        let data = finalMidi.toArray();
         let blob = new Blob([data], { type: "audio/midi" });
         let filename = "recording-" + new Date().toISOString() + ".mid";
-        saveAs(blob, filename);
+        await localforage__WEBPACK_IMPORTED_MODULE_1___default().setItem(filename, blob);
+        console.log("Saved recording to local storage");
         return filename;
     }
+
+
+
+    // OLD CODE
+    // async saveRecordingToLocalStorage() {
+    //     this.recording = false;
+    //     let data = this.midi.toArray();
+    //     let blob = new Blob([data], { type: "audio/midi" });
+    //     let filename = "recording-" + new Date().toISOString() + ".mid";
+    //     await localforage.setItem(filename, blob);
+    //     console.log("Saved recording to local storage");
+    //     return filename;
+    // }
 
     isFirstNotePlayed() {
         return this.firstNotePlayed;
@@ -6982,24 +7102,37 @@ class MidiRecorder {
         console.log('Recording is active');
         let [status, noteNumber, velocity] = event.data;
         let messageType = status & 0xF0;
+
         if (messageType === 0x90 && velocity > 0) {  // note on
             // If this is the first note, set the start time
             if (this.startTime === null) {
                 this.startTime = Date.now();
                 this.firstNotePlayed = true;
             }
-            let deltaTime = this.totalTime + (Date.now() - this.startTime) / 1000;
-            this.notesOn[noteNumber] = deltaTime;
+
+            let deltaTime = (Date.now() - this.startTime) / 1000 - this.totalPauseDuration;
+            this.notesOn[noteNumber] = { start: Date.now(), deltaTime: deltaTime };
             console.log('Note on message received');
         } else if ((messageType === 0x80) || (messageType === 0x90 && velocity === 0)) {  // note off
-            let noteOnTime = this.notesOn[noteNumber];
-            if (noteOnTime !== undefined) {
-                let duration = ((Date.now() - this.startTime) / 1000) - noteOnTime;
+            let noteOnData = this.notesOn[noteNumber];
+
+            if (noteOnData !== undefined) {
+                let noteOnTime = noteOnData.deltaTime;
+                let noteOffTime = (Date.now() - this.startTime) / 1000 - this.totalPauseDuration;
+                let duration = noteOffTime - noteOnTime;
+
+                // Ensure duration is not negative
+                if (duration < 0) {
+                    console.error(`Negative duration for note ${noteNumber}: ${duration}`);
+                    duration = 0;
+                }
+
                 let channel = status & 0x0F;
+
                 try {
                     this.track.addNote({
                         midi: noteNumber,
-                        time: noteOnTime,
+                        time: Math.max(noteOnTime, 0),  // Ensure time is not negative
                         duration: duration,
                         velocity: velocity / 127,
                         channel: channel,
@@ -7008,10 +7141,50 @@ class MidiRecorder {
                 } catch (error) {
                     console.log('Error adding note to track:', error);
                 }
+
                 delete this.notesOn[noteNumber];
             }
         }
     }
+
+
+    // OLD CODE
+    //     handleMIDIMessage(event) {
+    //         console.log('Received MIDI message', event.data);
+    //         if (!this.recording || !this.firstNotePlayed && event.data[2] === 0) return;
+    //         console.log('Recording is active');
+    //         let [status, noteNumber, velocity] = event.data;
+    //         let messageType = status & 0xF0;
+    //         if (messageType === 0x90 && velocity > 0) {  // note on
+    //             // If this is the first note, set the start time
+    //             if (this.startTime === null) {
+    //                 this.startTime = Date.now();
+    //                 this.firstNotePlayed = true;
+    //             }
+    //             let deltaTime = this.totalTime + (Date.now() - this.startTime) / 1000;
+    //             this.notesOn[noteNumber] = deltaTime;
+    //             console.log('Note on message received');
+    //         } else if ((messageType === 0x80) || (messageType === 0x90 && velocity === 0)) {  // note off
+    //             let noteOnTime = this.notesOn[noteNumber];
+    //             if (noteOnTime !== undefined) {
+    //                 let duration = ((Date.now() - this.startTime) / 1000) - noteOnTime;
+    //                 let channel = status & 0x0F;
+    //                 try {
+    //                     this.track.addNote({
+    //                         midi: noteNumber,
+    //                         time: noteOnTime,
+    //                         duration: duration,
+    //                         velocity: velocity / 127,
+    //                         channel: channel,
+    //                     });
+    //                     console.log('Note added to track');
+    //                 } catch (error) {
+    //                     console.log('Error adding note to track:', error);
+    //                 }
+    //                 delete this.notesOn[noteNumber];
+    //             }
+    //         }
+    //     }
 }
 
 /* harmony default export */ const __WEBPACK_DEFAULT_EXPORT__ = (MidiRecorder);
@@ -9866,6 +10039,14 @@ class UI {
 		saveRecordingButton.classList.add("recordingControl");
 		saveRecordingButton.style.display = "none";
 
+		let exportRecordingButton = _DomHelper_js__WEBPACK_IMPORTED_MODULE_0__.DomHelper.createGlyphiconTextButton(
+			"exportRecording",
+			"export",
+			"Export Recording",
+			this.exportRecording.bind(this)
+		);
+		exportRecordingButton.classList.add("recordingControl");
+
 		// Timer for visualizing the recording
 		let timer = document.createElement("span");
 		timer.id = "recordingTimer";
@@ -9886,6 +10067,7 @@ class UI {
 				pauseRecordingButton,
 				clearRecordingButton,
 				saveRecordingButton,
+				exportRecordingButton,
 				timer,
 				recordSymbol
 			];
@@ -9994,8 +10176,14 @@ class UI {
 		this.timerInterval = null; // Pause the timer
 	}
 
+	async exportRecording() {
+		let file = (0,_player_Player_js__WEBPACK_IMPORTED_MODULE_4__.getSongFilename)();
+		await this.midiRecorder.saveRecording(file);
+	}
 	async saveRecording() {
-		await this.midiRecorder.saveRecording();
+		let file = await this.midiRecorder.saveRecordingToLocalStorage();
+		console.log(file);
+		(0,_player_Player_js__WEBPACK_IMPORTED_MODULE_4__.getPlayer)().loadFromRecording(file);
 	}
 
 }

@@ -2,7 +2,7 @@ import { DomHelper } from "./DomHelper.js"
 import { getSettingsDiv } from "../settings/Settings.js"
 import { ZoomUI } from "./ZoomUI.js"
 import { createTrackDivs } from "./TrackUI.js"
-import { getCurrentSong, getPlayer } from "../player/Player.js"
+import { getCurrentSong, getPlayer, getSongFilename } from "../player/Player.js"
 import { SongUI } from "./SongUI.js"
 import { getMidiHandler } from "../MidiInputHandler.js"
 import MidiRecorder from "../recording/midi-recorder.js"
@@ -998,6 +998,14 @@ export class UI {
 		saveRecordingButton.classList.add("recordingControl");
 		saveRecordingButton.style.display = "none";
 
+		let exportRecordingButton = DomHelper.createGlyphiconTextButton(
+			"exportRecording",
+			"export",
+			"Export Recording",
+			this.exportRecording.bind(this)
+		);
+		exportRecordingButton.classList.add("recordingControl");
+
 		// Timer for visualizing the recording
 		let timer = document.createElement("span");
 		timer.id = "recordingTimer";
@@ -1018,6 +1026,7 @@ export class UI {
 				pauseRecordingButton,
 				clearRecordingButton,
 				saveRecordingButton,
+				exportRecordingButton,
 				timer,
 				recordSymbol
 			];
@@ -1126,8 +1135,16 @@ export class UI {
 		this.timerInterval = null; // Pause the timer
 	}
 
+	async exportRecording() {
+		let file = getSongFilename();
+		await this.midiRecorder.saveRecording(file);
+	}
 	async saveRecording() {
-		await this.midiRecorder.saveRecording();
+		let file = await this.midiRecorder.saveRecordingToLocalStorage();
+		console.log(file);
+		clearInterval(this.timerInterval);
+		this.timerInterval = null; // Pause the timer
+		getPlayer().loadFromRecording(file);
 	}
 
 }

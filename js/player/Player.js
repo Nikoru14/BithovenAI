@@ -25,6 +25,8 @@ class Player {
 		getMidiHandler().setNoteOnCallback(this.addInputNoteOn.bind(this))
 		getMidiHandler().setNoteOffCallback(this.addInputNoteOff.bind(this))
 
+		this.songFilename = ""
+
 		this.startDelay = -2.5
 		this.lastTime = this.audioPlayer.getContextTime()
 		this.progress = 0
@@ -119,33 +121,35 @@ class Player {
 	}
 
 	async loadSong(theSong, fileName, name) {
-		this.audioPlayer.stopAllSources()
-		getLoader().startLoad()
-		getLoader().setLoadMessage("Loading " + fileName + ".")
+		this.audioPlayer.stopAllSources();
+		getLoader().startLoad();
+		getLoader().setLoadMessage("Loading " + fileName + ".");
 		if (this.audioPlayer.isRunning()) {
-			this.audioPlayer.suspend()
+			this.audioPlayer.suspend();
 		}
 
-		this.loading = true
+		this.loading = true;
 
-		getLoader().setLoadMessage("Parsing Midi File.")
+		getLoader().setLoadMessage("Parsing Midi File.");
 		try {
-			let midiFile = await MidiLoader.loadFile(theSong)
-			this.setSong(new Song(midiFile, fileName, name))
-			getLoader().setLoadMessage("Loading Instruments")
+			let midiFile = await MidiLoader.loadFile(theSong);
+			this.setSong(new Song(midiFile, fileName, name));
+			getLoader().setLoadMessage("Loading Instruments");
 
-			await this.audioPlayer.loadInstrumentsForSong(this.song)
+			this.songFilename = fileName;
+			await this.audioPlayer.loadInstrumentsForSong(this.song);
 
-			getLoader().setLoadMessage("Creating Buffers")
-			return this.audioPlayer.loadBuffers().then(v => getLoader().stopLoad())
+			getLoader().setLoadMessage("Creating Buffers");
+			return this.audioPlayer.loadBuffers().then(v => getLoader().stopLoad());
 		} catch (error) {
 			console.log(error)
-			Notification.create("Couldn't read Midi-File - " + error, 2000)
-			getLoader().stopLoad()
+			Notification.create("Couldn't read Midi-File - " + error, 2000);
+			getLoader().stopLoad();
 		}
 	}
 
-	async loadFromRecording(fileName, name) {
+	async loadFromRecording(fileName) {
+		let name = fileName;
 		this.audioPlayer.stopAllSources();
 		getLoader().startLoad();
 		getLoader().setLoadMessage("Loading " + fileName + ".");
@@ -160,7 +164,10 @@ class Player {
 
 		try {
 			// Retrieve the MIDI file from localforage
+
 			let theSongBlob = await localforage.getItem(fileName);
+			console.log(theSongBlob);
+
 
 			if (theSongBlob == null) {
 				throw new Error("No file found with the name " + fileName);
@@ -174,6 +181,7 @@ class Player {
 			// Pass URL to MidiLoader.loadFile
 			let midiFile = await MidiLoader.loadFile(theSongURL);
 			this.setSong(new Song(midiFile, fileName, name));
+			this.songFilename = fileName;
 			getLoader().setLoadMessage("Loading Instruments");
 
 			await this.audioPlayer.loadInstrumentsForSong(this.song);
@@ -533,6 +541,9 @@ export const getCurrentSong = () => {
 	return thePlayer.song
 }
 
+export const getSongFilename = () => {
+	return thePlayer.song.getSongFilename()
+}
 export const getPlayerState = () => {
 	return thePlayer.getState()
 }

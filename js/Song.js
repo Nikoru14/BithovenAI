@@ -322,4 +322,7 @@ export class Song {
 		channels[9].instrument = -1
 		return channels
 	}
+	getSongFilename() {
+		return this.fileName;
+	}
 }
