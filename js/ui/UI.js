@@ -802,7 +802,7 @@ export class UI {
 			const generatedMidi = await generator.generateMelody(seedMidi, noteCount);
 			console.log("Generated melody:", generatedMidi);
 
-			let file = await generator.saveMiditoLocalforage(generatedMidi);
+			let file = await generator.combineInputWithGenerated(seedMidi, generatedMidi);
 			getPlayer().loadFromlocalforage(file);
 
 		} catch (error) {

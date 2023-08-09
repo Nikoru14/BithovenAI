@@ -153,6 +153,59 @@ class MelodyGenerator {
         return filename;
     }
 
+    async combineInputWithGenerated(inputMidiBlob, generatedMidiArray) {
+        // Convert input Blob to Midi object
+        let inputArrayBuffer = await inputMidiBlob.arrayBuffer();
+        let inputUint8Array = new Uint8Array(inputArrayBuffer);
+        let inputMidi = new Midi(inputUint8Array);
+
+        // Convert generatedMidiArray to Midi object
+        let generatedMidi = new Midi(generatedMidiArray);
+
+        // Calculate the total duration of the inputMidi
+        let inputDuration = 0;
+        for (let track of inputMidi.tracks) {
+            for (let note of track.notes) {
+                inputDuration = Math.max(inputDuration, note.time + note.duration);
+            }
+        }
+
+        // Add a small padding to inputDuration
+        inputDuration += 0.5;  // Add half a second padding, adjust as needed
+
+        // Create a combined Midi object
+        let combinedMidi = new Midi();
+
+        // Add tracks from inputMidi
+        for (let track of inputMidi.tracks) {
+            let combinedTrack = combinedMidi.addTrack();
+            for (let note of track.notes) {
+                combinedTrack.addNote(note);
+            }
+        }
+
+        // Add tracks from generatedMidi with adjusted time
+        for (let track of generatedMidi.tracks) {
+            let combinedTrack = combinedMidi.addTrack();
+            for (let note of track.notes) {
+                let adjustedNote = {
+                    ...note,
+                    time: note.time + inputDuration,
+                };
+                combinedTrack.addNote(adjustedNote);
+            }
+        }
+
+        // Convert combined Midi object back to Blob for storage or download
+        let combinedMidiArray = combinedMidi.toArray();
+        let combinedMidiBlob = new Blob([combinedMidiArray], { type: "audio/midi" });
+        let filename = "combined-" + new Date().toISOString() + ".mid";
+        await localforage.setItem(filename, combinedMidiBlob);
+
+        return filename;
+    }
+
+
     decodeGeneratedNotes(notes) {
         return notes.map(note => {
             if (note.includes('.')) { // It's a chord
