@@ -6,7 +6,8 @@ import { getCurrentSong, getPlayer, getSongFilename } from "../player/Player.js"
 import { SongUI } from "./SongUI.js"
 import { getMidiHandler } from "../MidiInputHandler.js"
 import MidiRecorder from "../recording/midi-recorder.js"
-
+import MelodyGenerator from "../generate/melody-generator.js"
+import localforage from "localforage"
 /**
  * Contains all initiation, appending and manipulation of DOM-elements.
  * Callback-bindings for some events are created in  the constructor
@@ -769,9 +770,44 @@ export class UI {
 		return this.generateMelodyButton;
 	}
 
-	clickGenerateMelody(ev) {
-		this.clickStop();
-		console.log("Generating melody...");
+	async clickGenerateMelody(ev) {
+		try {
+			this.clickStop(); // Stop any current playback
+
+			const modelPath = "./js/generate/model/model.json";
+			const generator = new MelodyGenerator(modelPath);
+
+			await generator.loadModel();
+
+			let midiFile = await getSongFilename();
+
+			// Check if song name is null or undefined
+			if (!midiFile) {
+				console.error("Song name is null or undefined.");
+				return; // Exit the function
+			}
+
+			const seedMidi = await localforage.getItem(midiFile);
+
+			// Prompt user for note count
+			let noteCount = window.prompt("Enter the number of notes you want to generate:", "100");
+			noteCount = parseInt(noteCount, 10);
+
+			// Handle if user presses Cancel or inputs an invalid number
+			if (isNaN(noteCount) || noteCount <= 0 || noteCount > 100) {
+				window.messageBox("Invalid number of notes. Please enter a number between 1 and 100.");
+				return;
+			}
+
+			const generatedMidi = await generator.generateMelody(seedMidi, noteCount);
+			console.log("Generated melody:", generatedMidi);
+
+			let file = await generator.saveMiditoLocalforage(generatedMidi);
+			getPlayer().loadFromlocalforage(file);
+
+		} catch (error) {
+			console.error("Error in clickGenerateMelody:", error);
+		}
 	}
 
 	getRecordingDialog() {
@@ -1144,7 +1180,7 @@ export class UI {
 		console.log(file);
 		clearInterval(this.timerInterval);
 		this.timerInterval = null; // Pause the timer
-		getPlayer().loadFromRecording(file);
+		getPlayer().loadFromlocalforage(file);
 	}
 
 }

@@ -148,7 +148,7 @@ class Player {
 		}
 	}
 
-	async loadFromRecording(fileName) {
+	async loadFromlocalforage(fileName) {
 		let name = fileName;
 		this.audioPlayer.stopAllSources();
 		getLoader().startLoad();
@@ -493,7 +493,7 @@ class Player {
 	}
 
 	addInputNoteOn(noteNumber) {
-		console.log(pianoNotes[noteNumber])
+		// console.log(pianoNotes[noteNumber])
 		if (this.inputActiveNotes.hasOwnProperty(noteNumber)) {
 			console.log("NOTE ALREADY PLAING")
 			this.audioPlayer.noteOffContinuous(

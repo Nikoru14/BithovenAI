@@ -10,7 +10,7 @@ class MidiRecorder {
         this.pauseTime = null;
         this.totalTime = 0;
         this.currentTrack = null;
-        this.totalPauseDuration = 0;  // Add this to track total pause time
+        this.totalPauseDuration = 0;
         this.notesOn = {};
         this.firstNotePlayed = false;
         this.recordedTracks = [];
@@ -148,19 +148,6 @@ class MidiRecorder {
         return filename;
     }
 
-
-
-    // OLD CODE
-    // async saveRecordingToLocalStorage() {
-    //     this.recording = false;
-    //     let data = this.midi.toArray();
-    //     let blob = new Blob([data], { type: "audio/midi" });
-    //     let filename = "recording-" + new Date().toISOString() + ".mid";
-    //     await localforage.setItem(filename, blob);
-    //     console.log("Saved recording to local storage");
-    //     return filename;
-    // }
-
     isFirstNotePlayed() {
         return this.firstNotePlayed;
     }
@@ -215,45 +202,6 @@ class MidiRecorder {
             }
         }
     }
-
-
-    // OLD CODE
-    //     handleMIDIMessage(event) {
-    //         console.log('Received MIDI message', event.data);
-    //         if (!this.recording || !this.firstNotePlayed && event.data[2] === 0) return;
-    //         console.log('Recording is active');
-    //         let [status, noteNumber, velocity] = event.data;
-    //         let messageType = status & 0xF0;
-    //         if (messageType === 0x90 && velocity > 0) {  // note on
-    //             // If this is the first note, set the start time
-    //             if (this.startTime === null) {
-    //                 this.startTime = Date.now();
-    //                 this.firstNotePlayed = true;
-    //             }
-    //             let deltaTime = this.totalTime + (Date.now() - this.startTime) / 1000;
-    //             this.notesOn[noteNumber] = deltaTime;
-    //             console.log('Note on message received');
-    //         } else if ((messageType === 0x80) || (messageType === 0x90 && velocity === 0)) {  // note off
-    //             let noteOnTime = this.notesOn[noteNumber];
-    //             if (noteOnTime !== undefined) {
-    //                 let duration = ((Date.now() - this.startTime) / 1000) - noteOnTime;
-    //                 let channel = status & 0x0F;
-    //                 try {
-    //                     this.track.addNote({
-    //                         midi: noteNumber,
-    //                         time: noteOnTime,
-    //                         duration: duration,
-    //                         velocity: velocity / 127,
-    //                         channel: channel,
-    //                     });
-    //                     console.log('Note added to track');
-    //                 } catch (error) {
-    //                     console.log('Error adding note to track:', error);
-    //                 }
-    //                 delete this.notesOn[noteNumber];
-    //             }
-    //         }
-    //     }
 }
 
 export default MidiRecorder;
