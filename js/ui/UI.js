@@ -9,6 +9,8 @@ import MidiRecorder from "../recording/midi-recorder.js"
 import { Midi, Track, Note } from '@tonejs/midi';
 import MelodyGenerator from "../generate/melody-generator.js"
 import localforage from "localforage"
+import { getLoader } from "./Loader.js"
+
 /**
  * Contains all initiation, appending and manipulation of DOM-elements.
  * Callback-bindings for some events are created in  the constructor
@@ -18,6 +20,16 @@ export class UI {
 		this.isMobile = window.matchMedia(
 			"only screen and (max-width: 1600px)"
 		).matches
+
+		this.recordingInProgress = false;
+
+		this.recordingControlsState = {
+			startRecordingVisible: true,
+			pauseRecordingVisible: false,
+			clearRecordingVisible: false,
+			saveRecordingVisible: false,
+			exportRecordingVisible: true,
+		};
 
 		this.timerInterval = null;
 
@@ -778,6 +790,9 @@ export class UI {
 			const modelPath = "./js/generate/model/model.json";
 			const generator = new MelodyGenerator(modelPath);
 
+			getLoader().startLoad();
+			getLoader().setLoadMessage("Loading LSTM model");
+
 			await generator.loadModel();
 
 			let midiFile = await getSongFilename();
@@ -800,11 +815,14 @@ export class UI {
 				return;
 			}
 
+			getLoader().setLoadMessage("Gennerating Melody ")
+
 			const generatedMidi = await generator.generateMelody(seedMidi, noteCount);
 			console.log("Generated melody:", generatedMidi);
 
 			this.midiRecorder.recordedTracks.push(new Midi(generatedMidi).tracks[0]);
 
+			getLoader().stopLoad();
 			let file = await generator.combineInputWithGenerated(seedMidi, generatedMidi);
 			getPlayer().loadFromlocalforage(file);
 
@@ -822,18 +840,21 @@ export class UI {
 			this.hideDiv(this.recordingDialog);
 			document.body.appendChild(this.recordingDialog);
 
-			this.recordingDialog.innerHTML = ''; // clear the recording dialog
-
 			let text = DomHelper.createDivWithClass(
 				"centeredBigText",
 				{ marginTop: "25px" },
 				{ innerHTML: "Recording Controls:" }
 			);
+
+			this.recordingControlsContainer = document.createElement("div"); // Create a container for recording controls
+
 			this.recordingDialog.appendChild(text);
+			this.recordingDialog.appendChild(this.recordingControlsContainer); // Append the controls container
+
 			if (this.hasActiveInput) {
 				let recordingControls = this.getRecordingControls.bind(this)();
 				recordingControls.forEach(control => {
-					this.recordingDialog.appendChild(control);
+					this.recordingControlsContainer.appendChild(control); // Append controls to the container
 				});
 			} else {
 				let noInputText = DomHelper.createDivWithClass(
@@ -841,14 +862,13 @@ export class UI {
 					{ marginTop: "25px" },
 					{ innerHTML: "No MIDI input device selected" }
 				);
-				this.recordingDialog.appendChild(noInputText);
+				this.recordingControlsContainer.appendChild(noInputText); // Append the "No MIDI input device selected" message
 			}
 		}
 		this.recordingDialog.style.marginTop =
 			this.getNavBar().clientHeight + 25 + "px";
 		return this.recordingDialog;
 	}
-
 	checkMIDIInput() {
 		if (this.inputDevicesDiv) {
 			let inputDevicesDivs = this.inputDevicesDiv.childNodes;
@@ -864,19 +884,22 @@ export class UI {
 			}
 		}
 	}
-
 	clickRecord(ev) {
 		this.checkMIDIInput();
+
 		if (this.recordingDialogShown) {
+			// If the dialog is already shown, hide it and update the controls
 			this.hideDiv(this.getRecordingDialog());
 			DomHelper.removeClass("selected", this.recordButton);
 			this.recordingDialogShown = false;
+			this.updateRecordingControls();
 		} else {
+			// If the dialog is not shown, show it and update the controls
 			this.showDiv(this.getRecordingDialog());
 			DomHelper.addClassToElement("selected", this.recordButton);
 			this.recordingDialogShown = true;
+			this.updateRecordingControls();
 		}
-		this.updateRecordingControls(); // Update recording controls when record button is clicked
 	}
 
 	resetTrackMenuDiv() {
@@ -1008,6 +1031,7 @@ export class UI {
 			this.startRecording.bind(this)
 		);
 		startRecordingButton.classList.add("recordingControl");
+		startRecordingButton.style.display = this.recordingControlsState.startRecordingVisible ? "inline" : "none";
 
 		// Hide these buttons initially
 		let pauseRecordingButton = DomHelper.createGlyphiconTextButton(
@@ -1017,7 +1041,7 @@ export class UI {
 			this.pauseRecording.bind(this)
 		);
 		pauseRecordingButton.classList.add("recordingControl");
-		pauseRecordingButton.style.display = "none";
+		pauseRecordingButton.style.display = this.recordingControlsState.pauseRecordingVisible ? "inline" : "none";
 
 		let clearRecordingButton = DomHelper.createGlyphiconTextButton(
 			"clearRecording",
@@ -1026,7 +1050,7 @@ export class UI {
 			this.clearRecording.bind(this)
 		);
 		clearRecordingButton.classList.add("recordingControl");
-		clearRecordingButton.style.display = "none";
+		clearRecordingButton.style.display = this.recordingControlsState.clearRecordingVisible ? "inline" : "none";
 
 		let saveRecordingButton = DomHelper.createGlyphiconTextButton(
 			"saveRecording",
@@ -1035,7 +1059,7 @@ export class UI {
 			this.saveRecording.bind(this)
 		);
 		saveRecordingButton.classList.add("recordingControl");
-		saveRecordingButton.style.display = "none";
+		saveRecordingButton.style.display = this.recordingControlsState.saveRecordingVisible ? "inline" : "none";
 
 		let exportRecordingButton = DomHelper.createGlyphiconTextButton(
 			"exportRecording",
@@ -1044,6 +1068,7 @@ export class UI {
 			this.exportRecording.bind(this)
 		);
 		exportRecordingButton.classList.add("recordingControl");
+		exportRecordingButton.style.display = this.recordingControlsState.exportRecordingVisible ? "inline" : "none";
 
 		// Timer for visualizing the recording
 		let timer = document.createElement("span");
@@ -1077,48 +1102,26 @@ export class UI {
 	}
 
 	updateRecordingControls() {
-		// Logic to show/hide recording controls based on the selected MIDI device
-		if (this.hasActiveInput) {
-			// Show recording controls if a MIDI device is selected
-			this.getRecordingDialog().innerHTML = ''; // clear the recording dialog
-
-			this.recordingDialog.innerHTML = ''; // clear the recording dialog
-
-			let text = DomHelper.createDivWithClass(
-				"centeredBigText",
-				{ marginTop: "25px" },
-				{ innerHTML: "Recording Controls:" }
-			);
-			this.getRecordingDialog().appendChild(text);
-
-			let recordingControls = this.getRecordingControls.bind(this)();
-			recordingControls.forEach(control => {
-				this.getRecordingDialog().appendChild(control);
-			});
-		} else {
-			this.recordingDialog.innerHTML = ''; // clear the recording dialog
-
-			let text = DomHelper.createDivWithClass(
-				"centeredBigText",
-				{ marginTop: "25px" },
-				{ innerHTML: "Recording Controls:" }
-			);
-			this.getRecordingDialog().appendChild(text);
-
-			let noInputText = DomHelper.createDivWithClass(
-				"centeredBigText",
-				{ marginTop: "25px" },
-				{ innerHTML: "No MIDI input device selected" }
-			);
-			this.getRecordingDialog().appendChild(noInputText);
-		}
+		// Update recording controls based on the recording in progress state
+		const recordingControls = this.getRecordingControls();
+		recordingControls.forEach((control) => {
+			const controlId = control.id;
+			const controlVisible = this.recordingControlsState[controlId + "Visible"];
+			control.style.display = controlVisible ? "inline" : "none";
+		});
 	}
 
 	startRecording() {
 		if (this.hasActiveInput) {
 			this.clickStop()
 			this.midiRecorder.startRecording();
+			this.recordingInProgress = true; // Set recording in progress to true
 
+			this.recordingControlsState.startRecordingVisible = true;
+			this.recordingControlsState.pauseRecordingVisible = true;
+			this.recordingControlsState.clearRecordingVisible = true;
+			this.recordingControlsState.saveRecordingVisible = true;
+			this.recordingControlsState.exportRecordingVisible = true;
 			// Show the timer and the red record symbol
 			document.getElementById("recordingTimer").style.display = "inline";
 			document.getElementById("recordSymbol").style.display = "inline";
@@ -1159,6 +1162,13 @@ export class UI {
 
 	clearRecording() {
 		this.midiRecorder.clearRecording();
+		this.recordingInProgress = false; // Set recording in progress to false when cleared
+
+		this.recordingControlsState.startRecordingVisible = true;
+		this.recordingControlsState.pauseRecordingVisible = false;
+		this.recordingControlsState.clearRecordingVisible = false;
+		this.recordingControlsState.saveRecordingVisible = false;
+		this.recordingControlsState.exportRecordingVisible = false;
 		clearInterval(this.timerInterval);
 		this.timerInterval = null;
 		document.getElementById("recordSymbol").style.display = "none";
