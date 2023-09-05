@@ -6,6 +6,7 @@ import { getCurrentSong, getPlayer, getSongFilename } from "../player/Player.js"
 import { SongUI } from "./SongUI.js"
 import { getMidiHandler } from "../MidiInputHandler.js"
 import MidiRecorder from "../recording/midi-recorder.js"
+import { Midi, Track, Note } from '@tonejs/midi';
 import MelodyGenerator from "../generate/melody-generator.js"
 import localforage from "localforage"
 /**
@@ -801,6 +802,8 @@ export class UI {
 
 			const generatedMidi = await generator.generateMelody(seedMidi, noteCount);
 			console.log("Generated melody:", generatedMidi);
+
+			this.midiRecorder.recordedTracks.push(new Midi(generatedMidi).tracks[0]);
 
 			let file = await generator.combineInputWithGenerated(seedMidi, generatedMidi);
 			getPlayer().loadFromlocalforage(file);
