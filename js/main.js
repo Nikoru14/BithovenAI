@@ -4,6 +4,7 @@ import { InputListeners } from "./InputListeners.js"
 import { getPlayer, getPlayerState } from "./player/Player.js"
 import { loadJson } from "./Util.js"
 import { FileLoader } from "./player/FileLoader.js"
+import { clear } from "localforage"
 
 /**
  *
@@ -122,6 +123,7 @@ window.onload = () => {
 
 async function initApp() {
 	if (isInitialized) {
+		clearAuthMessage();
 		await init();
 		loading = true;
 		// renderLoop();
@@ -131,6 +133,13 @@ async function initApp() {
 	}
 }
 
+function clearAuthMessage() {
+	// Check if the auth message element exists and remove it
+	const authMessageElement = document.querySelector('.auth-message');
+	if (authMessageElement) {
+		authMessageElement.parentNode.removeChild(authMessageElement);
+	}
+}
 let listeners
 
 async function init() {
