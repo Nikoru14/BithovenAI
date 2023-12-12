@@ -48,39 +48,90 @@ import { FileLoader } from "./player/FileLoader.js"
  */
 let ui
 let loading
-let listeners
 
 
+function displayAuthMessage() {
+	const style = document.createElement('style');
+	style.textContent = `
+	body {
+		margin: 0;
+		height: 100vh;
+		display: flex;
+		justify-content: center;
+		align-items: center;
+		background-color: #f0f0f0;
+		font-family: Arial, sans-serif;
+	}
+	.auth-message {
+		text-align: center;
+		padding: 20px;
+		border-radius: 10px;
+		box-shadow: 0 4px 8px rgba(0, 0, 0, 0.2);
+		background-color: white;
+		max-width: 300px;
+	}
+	.auth-message p {
+		font-size: 18px;
+		color: #333;
+		margin: 0 0 10px;
+	}
+	.auth-message button {
+		padding: 10px 15px;
+		border: none;
+		border-radius: 5px;
+		background-color: #007bff;
+		color: white;
+		cursor: pointer;
+		font-size: 16px;
+	}
+	.auth-message button:hover {
+		background-color: #0056b3;
+	}
+    `;
+	document.head.appendChild(style);
+
+	const messageContainer = document.createElement('div');
+	messageContainer.className = 'auth-message';
+	messageContainer.innerHTML = `
+	<p>You must be logged in to access this page.</p>
+	<button onclick="location.reload()">Reload</button>
+    `;
+
+	document.body.innerHTML = '';
+	document.body.appendChild(messageContainer);
+}
 
 let isInitialized = false;
+let isMessageReceived = false;
 
 window.addEventListener('message', (event) => {
-	// Check for a specific message or a condition
-	if (event.data === 'initialize' && !isInitialized) {
-		initApp();
-		isInitialized = true;
+	if (event.data === 'initialize') {
+		isMessageReceived = true;
+		if (!isInitialized) {
+			isInitialized = true;
+			initApp();
+		}
 	}
 });
 
+window.onload = () => {
+	if (!isMessageReceived) {
+		displayAuthMessage();
+	}
+};
+
 async function initApp() {
-	// Existing initialization logic
-	await init();
-	loading = true;
-	// renderLoop();
-	// loadStartingSong();
+	if (isInitialized) {
+		await init();
+		loading = true;
+		// renderLoop();
+		// loadStartingSong();
+	} else {
+		displayAuthMessage();
+	}
 }
 
-// Comment out or remove the existing window.onload
-// window.onload = async function () {
-//     await initApp();
-// }
-
-//window.onload = async function () {
-//	await init()
-//	loading = true
-//
-//	loadSongFromURL("http://www.piano-midi.de/midis/brahms/brahms_opus1_1_format0.mid")
-//}
+let listeners
 
 async function init() {
 	render = new Render()
