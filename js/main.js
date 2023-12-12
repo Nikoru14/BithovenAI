@@ -4,7 +4,6 @@ import { InputListeners } from "./InputListeners.js"
 import { getPlayer, getPlayerState } from "./player/Player.js"
 import { loadJson } from "./Util.js"
 import { FileLoader } from "./player/FileLoader.js"
-import { clear } from "localforage"
 
 /**
  *
@@ -60,7 +59,7 @@ function displayAuthMessage() {
 		display: flex;
 		justify-content: center;
 		align-items: center;
-		background-color: #f0f0f0;
+		background-color: #424242;
 		font-family: Arial, sans-serif;
 	}
 	.auth-message {
@@ -106,6 +105,7 @@ let isInitialized = false;
 let isMessageReceived = false;
 
 window.addEventListener('message', (event) => {
+	cpnsole.log(event.data);
 	if (event.data === 'initialize') {
 		isMessageReceived = true;
 		if (!isInitialized) {
