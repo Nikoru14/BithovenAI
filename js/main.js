@@ -50,12 +50,37 @@ let ui
 let loading
 let listeners
 
-window.onload = async function () {
-	await init()
-	loading = true
 
-	//	loadSongFromURL("http://www.piano-midi.de/midis/brahms/brahms_opus1_1_format0.mid")
+
+let isInitialized = false;
+
+window.addEventListener('message', (event) => {
+	// Check for a specific message or a condition
+	if (event.data === 'initialize' && !isInitialized) {
+		initApp();
+		isInitialized = true;
+	}
+});
+
+async function initApp() {
+	// Existing initialization logic
+	await init();
+	loading = true;
+	// renderLoop();
+	// loadStartingSong();
 }
+
+// Comment out or remove the existing window.onload
+// window.onload = async function () {
+//     await initApp();
+// }
+
+//window.onload = async function () {
+//	await init()
+//	loading = true
+//
+//	loadSongFromURL("http://www.piano-midi.de/midis/brahms/brahms_opus1_1_format0.mid")
+//}
 
 async function init() {
 	render = new Render()
