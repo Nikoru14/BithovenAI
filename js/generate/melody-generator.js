@@ -1,13 +1,11 @@
 import * as tf from '@tensorflow/tfjs';
 import { Midi } from '@tonejs/midi';
 import localforage from 'localforage';
-import mapping from './model/mapping.json';
-import reverse_mapping from './model/reverse_mapping.json';
 
 class MelodyGenerator {
-    constructor(modelPath) {
+    constructor(modelConfig, mapping, reverse_mapping) {
         this.model = null;
-        this.modelPath = modelPath;
+        this.modelConfig = modelConfig;
         this.mapping = mapping;
         this.reverseMapping = reverse_mapping;
     }
@@ -15,7 +13,7 @@ class MelodyGenerator {
     async loadModel() {
         console.log("Attempting to load model...");
         try {
-            this.model = await tf.loadLayersModel(this.modelPath);
+            this.model = await tf.loadLayersModel(this.modelConfig.path);
             console.log("Model loaded successfully!");
         } catch (error) {
             console.error("Error loading the model:", error);
@@ -33,7 +31,7 @@ class MelodyGenerator {
         });
     }
 
-    async generateMelody(seedMidi, noteCount) {
+    async generateMelody(seedMidi, noteCount, temparature) {
         console.log("Attempting to generate melody...");
         console.log("Seed MIDI:", seedMidi);
         try {
@@ -65,7 +63,7 @@ class MelodyGenerator {
                 const prediction = this.model.predict(seed);
 
                 // Temperature-like adjustment
-                const temperature = 1.0;
+                const temperature = temparature;
                 const logits = tf.div(tf.log(prediction), temperature);
                 const expPreds = tf.exp(logits);
                 const probas = tf.div(expPreds, tf.sum(expPreds));
@@ -171,7 +169,7 @@ class MelodyGenerator {
         }
 
         // Add a small padding to inputDuration
-        inputDuration += 0.5;  // Add half a second padding, adjust as needed
+        inputDuration += 0;  // Add half a second padding, adjust as needed
 
         // Create a combined Midi object
         let combinedMidi = new Midi();
@@ -198,11 +196,11 @@ class MelodyGenerator {
 
         // Convert combined Midi object back to Blob for storage or download
         let combinedMidiArray = combinedMidi.toArray();
-        let combinedMidiBlob = new Blob([combinedMidiArray], { type: "audio/midi" });
-        let filename = "combined-" + new Date().toISOString() + ".mid";
-        await localforage.setItem(filename, combinedMidiBlob);
+        // let combinedMidiBlob = new Blob([combinedMidiArray], { type: "audio/midi" });
+        // let filename = "combined-" + new Date().toISOString() + ".mid";
+        // await localforage.setItem(filename, combinedMidiBlob);
 
-        return filename;
+        return combinedMidiArray;
     }
 
 

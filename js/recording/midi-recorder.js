@@ -23,6 +23,8 @@ class MidiRecorder {
             return;
         }
 
+        this.updateTotalTime();
+
         this.recording = true;
 
         // Start a new track
@@ -45,48 +47,46 @@ class MidiRecorder {
     }
 
     pauseRecording() {
+        if (!this.recording) {
+            console.warn("Cannot pause because recording is not active.");
+            return;
+        }
         this.recording = false;
-        // If we are pausing, calculate the total time recorded so far and save the pause time
+
+        const now = performance.now();
         if (this.startTime !== null) {
-            this.totalTime += (Date.now() - this.startTime) / 1000;
-            this.pauseTime = Date.now();
+            this.totalTime += (now - this.startTime) / 1000;
+            this.pauseTime = now;
             this.startTime = null;
         }
-        // Complete any notes that are currently playing
-        for (let noteNumber in this.notesOn) {
+
+        // Complete any notes that are currently "on"
+        for (const noteNumber in this.notesOn) {
             if (this.notesOn.hasOwnProperty(noteNumber)) {
-                let noteOnData = this.notesOn[noteNumber];
-                let noteOnTime = noteOnData.deltaTime;
-                let noteOffTime = (Date.now() - this.startTime) / 1000 - this.totalPauseDuration;
-                let duration = noteOffTime - noteOnTime;
-
-                // Ensure duration is not negative
-                if (duration < 0) {
-                    console.error(`Negative duration for note ${noteNumber}: ${duration}`);
-                    duration = 0;
-                }
-
-                try {
-                    this.track.addNote({
-                        midi: noteNumber,
-                        time: Math.max(noteOnTime, 0),  // Ensure time is not negative
-                        duration: duration,
-                        velocity: 127 / 127,  // Use a default velocity for completed notes
-                        channel: 0,  // Use a default channel for completed notes
-                    });
-                    console.log('Note completed on pause');
-                } catch (error) {
-                    console.log('Error adding note to track:', error);
-                }
-
-                delete this.notesOn[noteNumber];
+                const noteOnData = this.notesOn[noteNumber];
+                const noteDuration = (now - noteOnData.startTime) / 1000;
+                this.track.addNote({
+                    midi: noteNumber,
+                    time: noteOnData.deltaTime,
+                    duration: noteDuration,
+                    velocity: 127 / 127
+                });
+                console.log(`Note ${noteNumber} completed at pause`);
             }
         }
-        // Add current track to the list of tracks and reset the current track
+
+        // Clear the notesOn since we've just completed them
+        this.notesOn = {};
+
+        // Track the total pause duration
+        this.totalPauseDuration += (now - this.pauseTime) / 1000;
+
+        // Push the current track to the recorded tracks and prepare a new one
         this.recordedTracks.push(this.track);
         this.track = this.midi.addTrack();
-    }
 
+        console.log("Recording paused.");
+    }
 
     clearRecording() {
         this.recording = false;  // Set to false when clearing the recording
@@ -151,54 +151,44 @@ class MidiRecorder {
     isFirstNotePlayed() {
         return this.firstNotePlayed;
     }
-
     handleMIDIMessage(event) {
         console.log('Received MIDI message', event.data);
-        if (!this.recording || !this.firstNotePlayed && event.data[2] === 0) return;
-        console.log('Recording is active');
-        let [status, noteNumber, velocity] = event.data;
-        let messageType = status & 0xF0;
+        if (!this.recording) return;
+
+        const [status, noteNumber, velocity] = event.data;
+        const messageType = status & 0xF0;
+        const now = event.receivedTime || performance.now(); // Use high-resolution time if available
 
         if (messageType === 0x90 && velocity > 0) {  // note on
-            // If this is the first note, set the start time
-            if (this.startTime === null) {
-                this.startTime = Date.now();
+            if (!this.firstNotePlayed) {
+                this.startTime = now;
                 this.firstNotePlayed = true;
             }
-
-            let deltaTime = (Date.now() - this.startTime) / 1000 - this.totalPauseDuration;
-            this.notesOn[noteNumber] = { start: Date.now(), deltaTime: deltaTime };
+            const deltaTime = (now - this.startTime) / 1000 - this.totalPauseDuration;
+            this.notesOn[noteNumber] = { startTime: now, deltaTime: deltaTime };
             console.log('Note on message received');
         } else if ((messageType === 0x80) || (messageType === 0x90 && velocity === 0)) {  // note off
-            let noteOnData = this.notesOn[noteNumber];
-
-            if (noteOnData !== undefined) {
-                let noteOnTime = noteOnData.deltaTime;
-                let noteOffTime = (Date.now() - this.startTime) / 1000 - this.totalPauseDuration;
-                let duration = noteOffTime - noteOnTime;
-
-                // Ensure duration is not negative
-                if (duration < 0) {
-                    console.error(`Negative duration for note ${noteNumber}: ${duration}`);
-                    duration = 0;
-                }
-
-                let channel = status & 0x0F;
-
-                try {
-                    this.track.addNote({
-                        midi: noteNumber,
-                        time: Math.max(noteOnTime, 0),  // Ensure time is not negative
-                        duration: duration,
-                        velocity: velocity / 127,
-                        channel: channel,
-                    });
-                    console.log('Note added to track');
-                } catch (error) {
-                    console.log('Error adding note to track:', error);
-                }
-
+            const noteOnData = this.notesOn[noteNumber];
+            if (noteOnData) {
+                const duration = (now - noteOnData.startTime) / 1000;
+                this.track.addNote({
+                    midi: noteNumber,
+                    time: noteOnData.deltaTime,
+                    duration: duration,
+                    velocity: velocity / 127
+                });
                 delete this.notesOn[noteNumber];
+                console.log('Note off message received');
+            }
+        }
+    }
+    // After each recording session
+    updateTotalTime() {
+        if (this.recordedTracks.length > 0) {
+            const lastTrack = this.recordedTracks[this.recordedTracks.length - 1];
+            const lastNote = lastTrack.notes[lastTrack.notes.length - 1];
+            if (lastNote) {
+                this.totalTime = lastNote.time + lastNote.duration;
             }
         }
     }

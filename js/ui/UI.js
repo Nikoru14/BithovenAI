@@ -35,6 +35,9 @@ export class UI {
 
 		this.midiRecorder = new MidiRecorder()
 
+		this.modelConfigs = null; // To store all model configurations
+		this.selectedModelConfig = null; // To store the selected model configuration
+
 		this.songUI = new SongUI()
 		//add callbacks to the player
 		getPlayer().newSongCallbacks.push(this.newSongCallback.bind(this))
@@ -55,6 +58,11 @@ export class UI {
 			)
 
 		document.body.appendChild(new ZoomUI().getContentDiv(render))
+
+		this.genDialog = null;
+
+		this.genDialogShown = false; // Track the visibility state of the generate dialog
+		this.createGenerateMelodyDialog(); // Call to create the dialog during initialization
 	}
 
 	setExampleSongs(exampleSongsJson) {
@@ -256,12 +264,17 @@ export class UI {
 		return this.settingsButton
 	}
 	hideDiv(div) {
-		div.classList.add("hidden")
-		div.classList.remove("unhidden")
+		if (div) {
+			div.classList.add("hidden");
+			div.classList.remove("unhidden");
+		}
 	}
+
 	showDiv(div) {
-		div.classList.remove("hidden")
-		div.classList.add("unhidden")
+		if (div) {
+			div.classList.remove("hidden");
+			div.classList.add("unhidden");
+		}
 	}
 	hideSettings() {
 		DomHelper.removeClass("selected", this.getSettingsButton())
@@ -776,58 +789,300 @@ export class UI {
 				"generateMelody",
 				"music", // Assuming the glyph icon for music is "music"
 				"Generate Melody",
-				this.clickGenerateMelody.bind(this)
+				this.toggleGenerateMelodyDialog.bind(this) // Toggle dialog on click
 			);
-			DomHelper.addClassToElement("floatSpanLeft", this.generateMelodyButton);
+			DomHelper.addClassToElement("btn-lg", this.generateMelodyButton);
 		}
 		return this.generateMelodyButton;
 	}
+
+	getGenerateMelodyDialog() {
+		if (!this.genDialog) {
+			this.genDialog = this.createGenerateMelodyDialog();
+		}
+		return this.genDialog;
+	}
+
+	toggleGenerateMelodyDialog() {
+		this.genDialogShown = !this.genDialogShown; // Toggle the visibility state
+		if (this.genDialogShown) {
+			this.showDiv(this.genDialog); // Show the dialog
+			DomHelper.addClassToElement("selected", this.generateMelodyButton);
+		} else {
+			this.hideDiv(this.genDialog); // Hide the dialog
+			DomHelper.removeClass("selected", this.generateMelodyButton);
+		}
+	}
+
+	async createGenerateMelodyDialog() {
+		if (this.genDialog) return; // Prevent creating multiple dialogs
+
+		// Create dialog container
+		this.genDialog = DomHelper.createDivWithIdAndClass(
+			"generateMelodyDialog",
+			"centeredMenuDiv"
+		);
+		// Load and store the model configurations
+		this.modelConfigs = await this.loadModelConfig();
+
+		// Dropdown for model selection
+		let modelNames = this.modelConfigs.map(model => model.name);
+		let modelSelect = DomHelper.createInputSelect(
+			"Model",
+			modelNames,
+			(selectedModelName) => {
+				// Find and store the selected model configuration
+				this.selectedModelConfig = this.modelConfigs.find(model => model.name === selectedModelName);
+				console.log("Model selected:", this.selectedModelConfig);
+			}
+		);
+		this.genDialog.appendChild(modelSelect);
+
+		// Dispatch the change event to set the initial model configuration
+		modelSelect.dispatchEvent(new Event('change'));
+
+		// Number input for note count
+		let noteCountInput = DomHelper.createSliderWithLabelAndField(
+			"noteCount",
+			"Number of Notes",
+			100, 1, 200, 1,
+			(value) => console.log("Note count:", value)
+		);
+		this.genDialog.appendChild(noteCountInput.container);
+
+		// Number input for temperature
+		let temperatureInput = DomHelper.createSliderWithLabelAndField(
+			"temperature",
+			"Temperature",
+			1.0, 0.1, 2.0, 0.1,
+			(value) => console.log("Temperature:", value)
+		);
+		this.genDialog.appendChild(temperatureInput.container);
+
+		// Container for the generate button
+		let generateButtonContainer = DomHelper.createDivWithClass("generateButtonContainer");
+		generateButtonContainer.style.display = "flex";
+		generateButtonContainer.style.justifyContent = "center"; // Center button horizontally
+		generateButtonContainer.style.marginBottom = "10px"; // Adds space below the container		
+
+		let generateButton = DomHelper.createTextButton(
+			"generateMelody",
+			"Generate Melody",
+			() => {
+				this.clickGenerateMelody();
+			}
+		);
+
+		generateButtonContainer.appendChild(generateButton);
+		this.genDialog.appendChild(generateButtonContainer);
+
+		// Container for variation buttons
+		let variationButtonsContainer = DomHelper.createDivWithClass("variationButtonsContainer");
+		variationButtonsContainer.style.justifyContent = "center"; // Center button horizontally
+		variationButtonsContainer.style.marginBottom = "10px"; // Adds space below the container
+		variationButtonsContainer.style.display = "flex";
+
+		for (let i = 1; i <= 3; i++) {
+			let variationButton = DomHelper.createTextButton(
+				"variation" + i,
+				"Variation " + i,
+				() => this.switchVariation(i - 1) // Subtract 1 to convert button number to array index
+			);
+			variationButtonsContainer.appendChild(variationButton);
+		}
+
+
+		this.genDialog.appendChild(variationButtonsContainer);
+
+		document.body.appendChild(this.genDialog); // Append the dialog to the body here
+		this.hideDiv(this.genDialog); // Hide the dialog immediately after creation
+
+		this.genDialog.style.marginTop = this.getNavBar().clientHeight + 25 + "px";
+
+	}
+
+	// Utility function to load JSON files
+	async loadJson(jsonPath) {
+		const response = await fetch(jsonPath);
+		if (!response.ok) {
+			throw new Error(`Could not load JSON at path: ${jsonPath}`);
+		}
+		return response.json();
+	}
+
+	async loadModelConfig() {
+		try {
+			const response = await fetch('./js/generate/model_config.json');
+			if (!response.ok) {
+				throw new Error(`HTTP error! status: ${response.status}`);
+			}
+			const config = await response.json();
+			return config.models; // Return the array of models
+		} catch (error) {
+			console.error("Could not load the model config JSON:", error);
+			return []; // Return an empty array to indicate failure
+		}
+	}
+
+	/*	async clickGenerateMelody(ev) {
+			try {
+				this.clickStop(); // Stop any current playback
+	
+				if (!this.selectedModelConfig) {
+					console.error("No model selected.");
+					return;
+				}
+	
+				// Load the mappings for the selected model
+				const mapping = await this.loadJson(this.selectedModelConfig.mappings);
+				const reverseMapping = await this.loadJson(this.selectedModelConfig.reverse_mappings);
+	
+				// Create a new instance of the MelodyGenerator with the loaded configurations
+				const generator = new MelodyGenerator(this.selectedModelConfig, mapping, reverseMapping);
+	
+				getLoader().startLoad();
+				getLoader().setLoadMessage("Loading LSTM model");
+	
+				await generator.loadModel();
+	
+				let midiFile = await getSongFilename();
+	
+				// Check if song name is null or undefined
+				if (!midiFile) {
+					console.error("Song name is null or undefined.");
+					return; // Exit the function
+				}
+	
+				const seedMidi = await localforage.getItem(midiFile);
+	
+				// Get the values from sliders
+				const noteCount = parseInt(document.getElementById('noteCount').value, 10);
+				const temperature = parseFloat(document.getElementById('temperature').value);
+	
+				// Handle if user presses Cancel or inputs an invalid number
+				if (isNaN(noteCount) || noteCount <= 0 || noteCount > 100) {
+					window.messageBox("Invalid number of notes. Please enter a number between 1 and 100.");
+					return;
+				}
+	
+				getLoader().setLoadMessage("Gennerating Melody ")
+	
+				const generatedMidi = await generator.generateMelody(seedMidi, noteCount, temperature);
+				console.log("Generated melody:", generatedMidi);
+	
+				this.midiRecorder.recordedTracks.push(new Midi(generatedMidi).tracks[0]);
+	
+				getLoader().stopLoad();
+				let file = await generator.combineInputWithGenerated(seedMidi, generatedMidi);
+				getPlayer().loadFromlocalforage(file);
+	
+			} catch (error) {
+				console.error("Error in clickGenerateMelody:", error);
+			}
+		}*/
 
 	async clickGenerateMelody(ev) {
 		try {
 			this.clickStop(); // Stop any current playback
 
-			const modelPath = "./js/generate/model/model.json";
-			const generator = new MelodyGenerator(modelPath);
+			if (!this.selectedModelConfig) {
+				console.error("No model selected.");
+				return;
+			}
 
-			getLoader().startLoad();
-			getLoader().setLoadMessage("Loading LSTM model");
+			// Load the mappings for the selected model
+			const mapping = await this.loadJson(this.selectedModelConfig.mappings);
+			const reverseMapping = await this.loadJson(this.selectedModelConfig.reverse_mappings);
+
+			// Create a new instance of the MelodyGenerator with the loaded configurations
+			const generator = new MelodyGenerator(this.selectedModelConfig, mapping, reverseMapping);
 
 			await generator.loadModel();
 
-			let midiFile = await getSongFilename();
-
-			// Check if song name is null or undefined
+			const midiFile = await getSongFilename();
 			if (!midiFile) {
 				console.error("Song name is null or undefined.");
 				return; // Exit the function
 			}
 
 			const seedMidi = await localforage.getItem(midiFile);
+			const noteCount = parseInt(document.getElementById('noteCount').value, 10);
+			let temperature = parseFloat(document.getElementById('temperature').value);
 
-			// Prompt user for note count
-			let noteCount = window.prompt("Enter the number of notes you want to generate:", "100");
-			noteCount = parseInt(noteCount, 10);
+			// Generate three variations
+			const variations = [];
+			for (let i = 0; i < 3; i++) {
+				if (i > 0) {
+					temperature = temperature + 1
+				}
+				getLoader().setLoadMessage(`Generating Melody Variation ${i + 1}`);
+				const generatedMidi = await generator.generateMelody(seedMidi, noteCount, temperature);
+				console.log(`Generated melody variation ${i + 1}:`, generatedMidi);
 
-			// Handle if user presses Cancel or inputs an invalid number
-			if (isNaN(noteCount) || noteCount <= 0 || noteCount > 100) {
-				window.messageBox("Invalid number of notes. Please enter a number between 1 and 100.");
-				return;
+				// Combine seed and generated MIDI
+				let combinedMidi = await generator.combineInputWithGenerated(seedMidi, generatedMidi);
+
+				// Save combined variation to localforage
+
+				let midiBlob = new Blob([combinedMidi], { type: "audio/midi" });
+
+				let variationName = `combined-variation-${i}-${Date.now()}.mid`;
+				await localforage.setItem(variationName, midiBlob);
+				variations.push(variationName);
 			}
 
-			getLoader().setLoadMessage("Gennerating Melody ")
+			// Load the first variation as the default
+			const firstVariationMidiBlob = await localforage.getItem(variations[0]);
+			const firstVariationMidiArrayBuffer = await firstVariationMidiBlob.arrayBuffer();
 
-			const generatedMidi = await generator.generateMelody(seedMidi, noteCount);
-			console.log("Generated melody:", generatedMidi);
+			const firstVariationMidi = new Midi(firstVariationMidiArrayBuffer);
 
-			this.midiRecorder.recordedTracks.push(new Midi(generatedMidi).tracks[0]);
-
+			this.midiRecorder.recordedTracks.push(firstVariationMidi.tracks[firstVariationMidi.tracks.length - 1]);
 			getLoader().stopLoad();
-			let file = await generator.combineInputWithGenerated(seedMidi, generatedMidi);
-			getPlayer().loadFromlocalforage(file);
+
+			// Load the first variation into the player
+			getPlayer().loadFromlocalforage(variations[0]);
+
+			// Store the variations in the UI instance for later access
+			this.variations = variations;
 
 		} catch (error) {
 			console.error("Error in clickGenerateMelody:", error);
+		}
+	}
+
+	async switchVariation(variationIndex) {
+		try {
+			const variationName = this.variations[variationIndex];
+			if (!variationName) {
+				console.error("Variation does not exist.");
+				return;
+			}
+
+			// Load the selected variation
+			const variationMidiBlob = await localforage.getItem(variationName);
+			if (!variationMidiBlob) {
+				console.error("Failed to load variation MIDI.");
+				return;
+			}
+
+			const variationMidiArrayBuffer = await variationMidiBlob.arrayBuffer();
+			const variationMidi = new Midi(variationMidiArrayBuffer);
+
+			// Get the last track from the variation MIDI
+			const lastTrack = variationMidi.tracks[variationMidi.tracks.length - 1];
+
+			// Assume there is always at least one track in the recordedTracks
+			// Replace the last track with the new variation's last track
+			this.midiRecorder.recordedTracks.pop();
+			this.midiRecorder.recordedTracks.push(lastTrack);
+
+			// Load the variation into the player
+			getPlayer().loadFromlocalforage(variationName);
+
+			console.log(`Switched to variation ${variationIndex + 1}`);
+		} catch (error) {
+			console.error("Error when switching variations:", error);
 		}
 	}
 

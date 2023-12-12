@@ -1,0 +1,14 @@
+{
+    "models": [
+        {
+            "name": "Classical Model",
+            "path": "./js/generate/model/classical/model.json",
+            "mappings": "./js/generate/model/classical/mapping.json",
+            "reverse_mappings": "./js/generate/model/classical/reverse_mapping.json",
+            "weights": [
+                "./js/generate/model/classical/group1-shard1of2.bin",
+                "./js/generate/model/classical/group1-shard2of2.bin"
+            ]
+        }
+    ]
+}
