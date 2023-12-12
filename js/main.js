@@ -105,7 +105,7 @@ let isInitialized = false;
 let isMessageReceived = false;
 
 window.addEventListener('message', (event) => {
-	cpnsole.log(event.data);
+	console.log(event.data);
 	if (event.data === 'initialize') {
 		isMessageReceived = true;
 		if (!isInitialized) {
