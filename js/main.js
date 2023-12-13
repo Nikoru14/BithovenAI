@@ -52,6 +52,7 @@ let loading
 
 function displayAuthMessage() {
 	const style = document.createElement('style');
+	style.id = 'auth-message-style';
 	style.textContent = `
 	body {
 		margin: 0;
@@ -116,7 +117,13 @@ window.addEventListener('message', (event) => {
 });
 
 window.onload = () => {
-	if (!isMessageReceived) {
+	// Check if running on localhost for development
+	if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+		console.log('Running on Localhost. Bypassing authentication message.');
+		isInitialized = true;
+		isMessageReceived = true;
+		initApp();
+	} else if (!isMessageReceived && !isInitialized) {
 		displayAuthMessage();
 	}
 };
@@ -134,12 +141,19 @@ async function initApp() {
 }
 
 function clearAuthMessage() {
-	// Check if the auth message element exists and remove it
+	// Remove the auth message element
 	const authMessageElement = document.querySelector('.auth-message');
 	if (authMessageElement) {
 		authMessageElement.parentNode.removeChild(authMessageElement);
 	}
+
+	// Remove the style element related to the auth message
+	const authStyleElement = document.getElementById('auth-message-style');
+	if (authStyleElement) {
+		authStyleElement.parentNode.removeChild(authStyleElement);
+	}
 }
+
 let listeners
 
 async function init() {
