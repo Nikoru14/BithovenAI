@@ -1013,8 +1013,10 @@ export class UI {
 			const variations = [];
 			for (let i = 0; i < 3; i++) {
 				if (i > 0) {
-					temperature = temperature + 1
+					temperature = temperature + 100
 				}
+
+				console.log('temperature: ' + temperature)
 				getLoader().setLoadMessage(`Generating Melody Variation ${i + 1}`);
 				const generatedMidi = await generator.generateMelody(seedMidi, noteCount, temperature);
 				console.log(`Generated melody variation ${i + 1}:`, generatedMidi);

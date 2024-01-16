@@ -31,22 +31,27 @@ class MelodyGenerator {
         });
     }
 
-    async generateMelody(seedMidi, noteCount, temparature) {
+    async generateMelody(seedMidi, noteCount, temperature) {
         console.log("Attempting to generate melody...");
         console.log("Seed MIDI:", seedMidi);
+
         try {
             if (!this.model) {
                 console.error("Model is not loaded yet!");
                 return;
             }
+
             console.log("seedMidi:", seedMidi);
             let arrayBuffer = await this.blobToArrayBuffer(seedMidi);
             console.log("arrayBuffer:", arrayBuffer);
+
             const seedNotes = this.parseMidi(arrayBuffer);
             console.log("seedNotes:", seedNotes);
+
             let seed = seedNotes.map(note => this.mapping[note]);
             console.log("seed:", seed);
-            // Ensure the seed is the correct len  gth
+
+            // Ensure the seed is the correct length
             const length = 40;  // Or whatever length your model expects
             if (seed.length < length) {
                 seed = Array(length - seed.length).fill(0).concat(seed);
@@ -63,7 +68,6 @@ class MelodyGenerator {
                 const prediction = this.model.predict(seed);
 
                 // Temperature-like adjustment
-                const temperature = temparature;
                 const logits = tf.div(tf.log(prediction), temperature);
                 const expPreds = tf.exp(logits);
                 const probas = tf.div(expPreds, tf.sum(expPreds));
@@ -71,9 +75,11 @@ class MelodyGenerator {
 
                 const decodedNote = this.reverseMapping[predictedNote];
 
-                if (decodedNote !== "0" && decodedNote !== "") {  // Check if predicted note is not "0" or blank
+                console.log(`Iteration ${i + 1} - Temperature: ${temperature} - Predicted Note: ${decodedNote}`);
+
+                if (decodedNote !== "0" && decodedNote !== "") {
                     generatedNotes.push(decodedNote);
-                    i++;  // Increment only if valid note is added
+                    i++;
                 }
 
                 // Always update the seed regardless of the predicted note
@@ -84,11 +90,40 @@ class MelodyGenerator {
             console.log("Generated Notes:", generatedNotes);
             const decodedNotes = this.decodeGeneratedNotes(generatedNotes);
             console.log("Decoded Notes:", decodedNotes);
+            const cleanedDecoded = this.cleanDecodedNotes(decodedNotes);
+            console.log("cleaned notes:  ", cleanedDecoded)
 
-            return this.buildMidi(decodedNotes);  // Build MIDI from decoded notes
+            return this.buildMidi(cleanedDecoded);
         } catch (error) {
             console.error("Error in generateMelody:", error);
         }
+    }
+
+    cleanDecodedNotes(decodedNotes) {
+        return decodedNotes.map(note => {
+            // Remove hyphen from note names
+            const cleanedNote = note.replace(/-/g, '');
+
+            // Remove characters after dot (.) if present
+            const dotIndex = cleanedNote.indexOf('.');
+            const finalNote = dotIndex !== -1 ? cleanedNote.substring(0, dotIndex) : cleanedNote;
+
+            // Extract note name and octave
+            const match = finalNote.match(/([A-G#]+)(\d+)/);
+            if (!match) {
+                // If no match found, return the original note
+                return finalNote;
+            }
+
+            // Extract note name and octave from the matched groups
+            const [, noteName, octave] = match;
+
+            // Ensure octave is within a valid range (1 to 8)
+            const validOctave = Math.min(8, Math.max(1, parseInt(octave, 10)));
+
+            // Construct the cleaned note with valid octave
+            return noteName + validOctave;
+        });
     }
 
     parseMidi(midiFile) {
