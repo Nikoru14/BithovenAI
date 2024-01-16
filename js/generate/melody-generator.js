@@ -69,8 +69,10 @@ class MelodyGenerator {
                 const probas = tf.div(expPreds, tf.sum(expPreds));
                 const predictedNote = probas.argMax(1).dataSync()[0];
 
-                if (this.reverseMapping[predictedNote] !== "0") {  // Check if predicted note is not "0"
-                    generatedNotes.push(this.reverseMapping[predictedNote]);
+                const decodedNote = this.reverseMapping[predictedNote];
+
+                if (decodedNote !== "0" && decodedNote !== "") {  // Check if predicted note is not "0" or blank
+                    generatedNotes.push(decodedNote);
                     i++;  // Increment only if valid note is added
                 }
 

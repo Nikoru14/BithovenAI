@@ -1026,7 +1026,7 @@ export class UI {
 
 				let midiBlob = new Blob([combinedMidi], { type: "audio/midi" });
 
-				let variationName = `combined-variation-${i}-${Date.now()}.mid`;
+				let variationName = `combined-variation-${i + 1}-${Date.now()}.mid`;
 				await localforage.setItem(variationName, midiBlob);
 				variations.push(variationName);
 			}

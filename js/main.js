@@ -130,6 +130,7 @@ window.onload = () => {
 
 async function initApp() {
 	if (isInitialized) {
+		console.log("app initialized!")
 		clearAuthMessage();
 		await init();
 		loading = true;
