@@ -101,30 +101,21 @@ class MelodyGenerator {
 
     cleanDecodedNotes(decodedNotes) {
         return decodedNotes.map(note => {
-            // Remove hyphen from note names
-            const cleanedNote = note.replace(/-/g, '');
+            // Remove hyphen from individual notes
+            const cleanedNote = note.replace(/([A-Ga-g#]+)(-)(\d+)/g, '$1$3');
 
-            // Remove characters after dot (.) if present
-            const dotIndex = cleanedNote.indexOf('.');
-            const finalNote = dotIndex !== -1 ? cleanedNote.substring(0, dotIndex) : cleanedNote;
-
-            // Extract note name and octave
-            const match = finalNote.match(/([A-G#]+)(\d+)/);
-            if (!match) {
-                // If no match found, return the original note
-                return finalNote;
+            // Fix invalid octave numbers
+            const parsedNote = cleanedNote.match(/([A-Ga-g#]+)(\d+)/);
+            if (parsedNote) {
+                const [, notePart, octave] = parsedNote;
+                const cleanedOctave = Math.max(1, Math.min(8, parseInt(octave, 10))); // Adjust octave range (1-8)
+                return notePart + cleanedOctave;
             }
 
-            // Extract note name and octave from the matched groups
-            const [, noteName, octave] = match;
-
-            // Ensure octave is within a valid range (1 to 8)
-            const validOctave = Math.min(8, Math.max(1, parseInt(octave, 10)));
-
-            // Construct the cleaned note with valid octave
-            return noteName + validOctave;
+            return cleanedNote;
         });
     }
+
 
     parseMidi(midiFile) {
         const midi = new Midi(midiFile);
