@@ -2,10 +2,15 @@
   "dependencies": {
     "@tensorflow/tfjs": "^4.10.0",
     "@tonejs/midi": "^2.0.28",
+    "html2pdf.js": "^0.10.1",
+    "jspdf": "^2.5.1",
     "localforage": "^1.10.0",
+    "midi-parser-js": "^4.0.4",
     "midi-writer-js": "^2.1.4",
+    "midiconvert": "^0.4.7",
     "tfjs": "^0.6.0",
-    "tonal": "^5.0.0"
+    "tonal": "^5.0.0",
+    "vexflow": "^4.2.3"
   },
   "name": "bithovenmain",
   "description": "## A JavaScript MIDI-Player/ Piano-learning webapp",

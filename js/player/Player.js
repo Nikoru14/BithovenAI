@@ -136,6 +136,11 @@ class Player {
 			this.setSong(new Song(midiFile, fileName, name));
 			getLoader().setLoadMessage("Loading Instruments");
 
+			// Save the MIDI blob to LocalForage
+			await localforage.setItem(fileName, theSong);
+			console.log("saved to localForage: " + fileName)
+			console.log("theSong", theSong)
+
 			this.songFilename = fileName;
 			await this.audioPlayer.loadInstrumentsForSong(this.song);
 

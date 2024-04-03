@@ -1,15 +1,19 @@
-import { DomHelper } from "./DomHelper.js"
-import { getSettingsDiv } from "../settings/Settings.js"
-import { ZoomUI } from "./ZoomUI.js"
-import { createTrackDivs } from "./TrackUI.js"
-import { getCurrentSong, getPlayer, getSongFilename } from "../player/Player.js"
-import { SongUI } from "./SongUI.js"
-import { getMidiHandler } from "../MidiInputHandler.js"
-import MidiRecorder from "../recording/midi-recorder.js"
+import { DomHelper } from "./DomHelper.js";
+import { getSettingsDiv } from "../settings/Settings.js";
+import { ZoomUI } from "./ZoomUI.js";
+import { createTrackDivs } from "./TrackUI.js";
+import { getCurrentSong, getPlayer, getSongFilename } from "../player/Player.js";
+import { SongUI } from "./SongUI.js";
+import { getMidiHandler } from "../MidiInputHandler.js";
+import MidiRecorder from "../recording/midi-recorder.js";
 import { Midi, Track, Note } from '@tonejs/midi';
-import MelodyGenerator from "../generate/melody-generator.js"
-import localforage from "localforage"
-import { getLoader } from "./Loader.js"
+import MelodyGenerator from "../generate/melody-generator.js";
+import localforage from "localforage";
+import { getLoader } from "./Loader.js";
+import { html2pdf } from "html2pdf.js";
+import { Vex } from "vexflow";
+import jsPDF from 'jspdf';
+import MidiParser from "midi-parser-js";
 
 /**
  * Contains all initiation, appending and manipulation of DOM-elements.
@@ -94,6 +98,7 @@ export class UI {
 		let songSpeedGrp = this.getSpeedButtonGroup()
 		let songControlGrp = this.getSongControlButtonGroup()
 		let generteMelodyGrp = this.getGenerateMelodyButton()
+		let saveMusicSheetGrp = this.getSaveMusicSheetButton()
 		let volumeGrp = this.getVolumneButtonGroup()
 		let settingsGrpRight = this.getSettingsButtonGroup()
 		let trackGrp = this.getTracksButtonGroup()
@@ -115,6 +120,7 @@ export class UI {
 		DomHelper.appendChildren(rightTop, [
 			songSpeedGrp,
 			volumeGrp,
+			saveMusicSheetGrp,
 			settingsGrpRight
 		])
 
@@ -788,12 +794,398 @@ export class UI {
 			this.generateMelodyButton = DomHelper.createGlyphiconTextButton(
 				"generateMelody",
 				"music", // Assuming the glyph icon for music is "music"
-				"Generate Melody",
+				"Generate",
 				this.toggleGenerateMelodyDialog.bind(this) // Toggle dialog on click
 			);
 			DomHelper.addClassToElement("btn-lg", this.generateMelodyButton);
 		}
 		return this.generateMelodyButton;
+	}
+
+	getSaveMusicSheetButton() {
+		if (!this.saveMusicSheetButton) {
+			this.saveMusicSheetButton = DomHelper.createGlyphiconTextButton(
+				"saveMusicSheet",
+				"save-file",
+				"Save Music Sheet",
+				this.saveMusicSheet.bind(this)
+			);
+			DomHelper.addClassToElement("btn-md", this.saveMusicSheetButton);
+		}
+		return this.saveMusicSheetButton;
+	}
+
+	async loadAndParseMIDI(songKey) {
+		const midiDataUrl = await localforage.getItem(songKey);
+		if (!midiDataUrl) {
+			console.error("No MIDI file found for key:", songKey);
+			return null;
+		}
+
+		// Check if the data is in base64 format and decode it
+		let base64String;
+		if (typeof midiDataUrl === 'string' && (midiDataUrl.startsWith('data:audio/mid;base64,') || midiDataUrl.startsWith('data:audio/midi;base64,'))) {
+			base64String = midiDataUrl.split(',')[1]; // Remove the data URL prefix to get the base64 string
+		} else if (midiDataUrl instanceof ArrayBuffer) {
+			base64String = this.base64ArrayBuffer(midiDataUrl);
+		} else if (midiDataUrl instanceof Blob) {
+			// to be implemented
+		} else {
+			console.error("The stored MIDI data is not in a recognized base64 format nor an ArrayBuffe nor a Blob.");
+			return null;
+		}
+
+		console.log('base64String: ', base64String);
+
+		try {
+			const midiParsed = await MidiParser.parse(base64String);
+			console.log("Parsed MIDI Data:", midiParsed);
+			return midiParsed;
+		} catch (error) {
+			console.error("Error parsing MIDI data:", error);
+			return null;
+		}
+	}
+
+	base64ArrayBuffer(arrayBuffer) {
+		var base64 = ''
+		var encodings = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'
+
+		var bytes = new Uint8Array(arrayBuffer)
+		var byteLength = bytes.byteLength
+		var byteRemainder = byteLength % 3
+		var mainLength = byteLength - byteRemainder
+
+		var a, b, c, d
+		var chunk
+
+		// Main loop deals with bytes in chunks of 3
+		for (var i = 0; i < mainLength; i = i + 3) {
+			// Combine the three bytes into a single integer
+			chunk = (bytes[i] << 16) | (bytes[i + 1] << 8) | bytes[i + 2]
+
+			// Use bitmasks to extract 6-bit segments from the triplet
+			a = (chunk & 16515072) >> 18 // 16515072 = (2^6 - 1) << 18
+			b = (chunk & 258048) >> 12 // 258048   = (2^6 - 1) << 12
+			c = (chunk & 4032) >> 6 // 4032     = (2^6 - 1) << 6
+			d = chunk & 63               // 63       = 2^6 - 1
+
+			// Convert the raw binary segments to the appropriate ASCII encoding
+			base64 += encodings[a] + encodings[b] + encodings[c] + encodings[d]
+		}
+
+		// Deal with the remaining bytes and padding
+		if (byteRemainder == 1) {
+			chunk = bytes[mainLength]
+
+			a = (chunk & 252) >> 2 // 252 = (2^6 - 1) << 2
+
+			// Set the 4 least significant bits to zero
+			b = (chunk & 3) << 4 // 3   = 2^2 - 1
+
+			base64 += encodings[a] + encodings[b] + '=='
+		} else if (byteRemainder == 2) {
+			chunk = (bytes[mainLength] << 8) | bytes[mainLength + 1]
+
+			a = (chunk & 64512) >> 10 // 64512 = (2^6 - 1) << 10
+			b = (chunk & 1008) >> 4 // 1008  = (2^6 - 1) << 4
+
+			// Set the 2 least significant bits to zero
+			c = (chunk & 15) << 2 // 15    = 2^4 - 1
+
+			base64 += encodings[a] + encodings[b] + encodings[c] + '='
+		}
+
+		return base64
+	}
+
+	base64ToArrayBuffer(base64) {
+		const binaryString = window.atob(base64);
+		const len = binaryString.length;
+		const bytes = new Uint8Array(len);
+		for (let i = 0; i < len; i++) {
+			bytes[i] = binaryString.charCodeAt(i);
+		}
+		return bytes.buffer;
+	}
+
+	midiToVexFlowNotes(midiData) {
+		const vfNotes = [];
+		const ticksPerQuarterNote = midiData.timeDivision;  // Get this from your MIDI file header
+
+		midiData.track.forEach(tr => {
+			tr.event.forEach(noteEvent => {
+				if (noteEvent.type === 9 || noteEvent.type === 'noteOn') {
+					const key = this.midiNoteNumberToKey(noteEvent.data[0]);
+					const durationInBeats = noteEvent.duration / ticksPerQuarterNote;
+					const durationString = this.durationToVexFlow(durationInBeats);
+
+					const vfNote = new Vex.Flow.StaveNote({
+						keys: [key],
+						duration: durationString
+					});
+
+					vfNotes.push(vfNote);
+				}
+			});
+		});
+
+		return vfNotes;
+	}
+
+
+	midiNoteNumberToKey(midiNumber) {
+		const octave = Math.floor(midiNumber / 12) - 1;
+		const noteIndex = midiNumber % 12;
+		const noteMap = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+		const note = noteMap[noteIndex];
+		return `${note}/${octave}`;
+	}
+
+	durationToVexFlow(durationInBeats) {
+		if (durationInBeats >= 4) return 'w'; // whole note
+		else if (durationInBeats >= 2) return 'h'; // half note
+		else if (durationInBeats >= 1) return 'q'; // quarter note
+		else if (durationInBeats >= 0.5) return '8'; // eighth note
+		else if (durationInBeats >= 0.25) return '16'; // sixteenth note
+		else if (durationInBeats >= 0.125) return '32'; // thirty-second note
+		else return 'q'; // default to quarter note if unspecified
+	}
+
+	getTimeSignature(midiData) {
+		// Default to 4/4 time if no time signature event is found
+		let numBeats = 4;
+		let beatValue = 4;
+
+		midiData.track.forEach(track => {
+			track.event.forEach(event => {
+				if (event.metaType === 0x58) {
+					numBeats = event.data[0];
+					beatValue = Math.pow(2, event.data[1]);  // MIDI time signature denominator is a negative power of 2
+				}
+			});
+		});
+		console.log('getTimeSignature called!!');
+		console.log('numBeats: ', numBeats);
+		console.log('beatValue: ', beatValue);
+
+		return { numBeats, beatValue };
+	}
+
+	async renderNotesAsPDF(vfNotes, midiData) {
+		const VF = Vex.Flow;
+		const div = document.createElement("div");
+		const renderer = new VF.Renderer(div, VF.Renderer.Backends.SVG);
+		renderer.resize(500, vfNotes.length * 100); // Adjust the height dynamically based on the number of notes
+		const context = renderer.getContext();
+
+		const { numBeats, beatValue } = this.getTimeSignature(midiData);
+
+		let currentTickSum = 0;
+		const maxTicksPerMeasure = numBeats * beatValue * VF.RESOLUTION / 4;
+		let voice = new VF.Voice({ num_beats: numBeats, beat_value: beatValue }).setMode(VF.Voice.Mode.SOFT);
+		let stave = new VF.Stave(10, 0, 400).addClef("treble").setContext(context).draw();
+		let staveNotes = [];
+
+		vfNotes.forEach((note, index) => {
+			const noteTicks = note.getTicks().value();
+			currentTickSum += noteTicks;
+			staveNotes.push(note);
+
+			if (currentTickSum >= maxTicksPerMeasure || index === vfNotes.length - 1) {
+				// Format and draw current voice with current stave notes
+				voice.addTickables(staveNotes);
+				new VF.Formatter().joinVoices([voice]).format([voice], stave.width - 20);
+				voice.draw(context, stave);
+
+				// Reset for next measure if not the last note
+				if (index < vfNotes.length - 1) {
+					voice = new VF.Voice({ num_beats: numBeats, beat_value: beatValue }).setMode(VF.Voice.Mode.SOFT);
+					stave = new VF.Stave(stave.x + stave.width, 0, 400).setEndBarType(VF.Barline.type.DOUBLE).addClef("treble").setContext(context).draw();
+				}
+
+				// Reset the tick sum and stave notes array
+				currentTickSum = 0;
+				staveNotes = [];
+			}
+		});
+
+		const svgString = div.innerHTML;
+		return svgString;
+	}
+
+	async convertSongToMusicSheet(currentSong) {
+		const midiData = await this.loadAndParseMIDI(currentSong);
+		if (!midiData) {
+			console.error("Error loading MIDI data");
+			return;
+		}
+
+		const vfNotes = this.midiToVexFlowNotes(midiData);
+		const pdfBlob = await this.renderNotesAsCanvas(vfNotes, midiData);
+		return pdfBlob;
+	}
+
+	async renderNotesAsCanvas(vfNotes, midiData) {
+		const VF = Vex.Flow;
+		// Create a canvas element
+		const canvas = document.createElement("canvas");
+		const context = canvas.getContext('2d');
+		const staveHeight = 120; // Height for each stave
+		const staveWidth = 750; // Width for each stave
+		const padding = 10; // Padding around each stave
+
+		// Calculate the required height based on the number of notes and stave height
+		const stavesNeeded = Math.ceil(vfNotes.length / 4); // Adjust based on how many notes you want per stave
+		canvas.width = staveWidth + padding * 2; // Add padding on the sides
+		canvas.height = stavesNeeded * staveHeight + padding * 2; // Height based on number of staves needed, plus top and bottom padding
+
+		// Fill the canvas with a white background
+		context.fillStyle = '#FFFFFF';
+		context.fillRect(0, 0, canvas.width, canvas.height);
+
+		// Initialize VexFlow with the canvas context
+		const renderer = new VF.Renderer(canvas, VF.Renderer.Backends.CANVAS);
+		renderer.resize(canvas.width, canvas.height);
+		const vfContext = renderer.getContext();
+
+		let currentX = padding; // Start drawing staves from the padding offset
+		let currentY = padding;
+
+		let currentTickSum = 0;
+		const { numBeats, beatValue } = this.getTimeSignature(midiData);
+		const maxTicksPerMeasure = numBeats * beatValue * VF.RESOLUTION / 4;
+		let voice = new VF.Voice({ num_beats: numBeats, beat_value: beatValue }).setMode(VF.Voice.Mode.SOFT);
+		let staveNotes = [];
+
+		vfNotes.forEach((note, index) => {
+			const noteTicks = note.getTicks().value();
+			currentTickSum += noteTicks;
+			staveNotes.push(note);
+
+			if (currentTickSum >= maxTicksPerMeasure || index === vfNotes.length - 1) {
+				// Create a stave at the current X and Y positions
+				let stave = new VF.Stave(currentX, currentY, staveWidth).addClef("treble").setContext(vfContext).draw();
+
+				// Format and draw current voice with current stave notes
+				voice.addTickables(staveNotes);
+				new VF.Formatter().joinVoices([voice]).format([voice], staveWidth - 20);
+				voice.draw(vfContext, stave);
+
+				// Reset for next measure if not the last note
+				currentTickSum = 0;
+				staveNotes = [];
+				voice = new VF.Voice({ num_beats: numBeats, beat_value: beatValue }).setMode(VF.Voice.Mode.SOFT);
+
+				// Move Y to the next stave's position
+				currentY += staveHeight;
+			}
+		});
+
+		return canvas; // Return the canvas element itself
+	}
+
+
+	async convertSvgToPdf(svgString) {
+		return new Promise((resolve, reject) => {
+			const pdf = new jsPDF({
+				orientation: 'portrait',
+				unit: 'mm',
+				format: 'a4'
+			});
+
+			// Check the SVG string
+			if (!svgString || typeof svgString !== 'string' || !svgString.startsWith('<svg')) {
+				console.error('Invalid SVG content');
+				reject(new Error('Invalid SVG content'));
+				return;
+			}
+
+			const img = new Image();
+
+			img.onload = () => {
+				try {
+					pdf.addImage(img, 'PNG', 0, 0, 210, 297);
+					const pdfBlob = pdf.output("blob");
+					resolve(pdfBlob);
+				} catch (error) {
+					console.error('Error adding image to PDF:', error);
+					reject(error);
+				}
+			};
+
+			img.onerror = (error) => {
+				console.error('Error loading image:', error, img);
+				reject(error);
+			};
+
+			// Ensure proper encoding of the SVG for Data URL
+			const svgDataUrl = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgString);
+			img.src = svgDataUrl;
+		});
+	}
+
+	saveSvg(svgString, filename) {
+		// Create a Blob from the SVG string
+		const blob = new Blob([svgString], { type: 'image/svg+xml' });
+
+		// Create a link element
+		const link = document.createElement('a');
+
+		// Set the download attribute to the filename
+		link.download = filename;
+
+		// Create a URL for the blob
+		link.href = URL.createObjectURL(blob);
+
+		// Append the link to the document
+		document.body.appendChild(link);
+
+		// Programmatically click the link to trigger the download
+		link.click();
+
+		// Remove the link from the document
+		document.body.removeChild(link);
+
+		// Release the URL object
+		URL.revokeObjectURL(link.href);
+	}
+
+	savePdf(pdfBlob, filename) {
+		const url = URL.createObjectURL(pdfBlob);
+		const a = document.createElement('a');
+		a.href = url;
+		a.download = filename;
+		document.body.appendChild(a);
+		a.click();
+		document.body.removeChild(a);
+		URL.revokeObjectURL(url);
+	}
+
+	async saveMusicSheet() {
+		const currentSong = getSongFilename(); // Ensure this function gets the correct key/filename
+		const title = prompt("Enter title:");
+		if (!title) {
+			console.error("Title is required. Music sheet not saved.");
+			return;
+		}
+
+		const musicSheetData = await this.convertSongToMusicSheet(currentSong);
+		if (musicSheetData) {
+			await this.saveCanvasAsImage(musicSheetData, `${title}_music_sheet.png`);
+			console.log("Music sheet saved successfully.");
+		}
+	}
+
+
+	saveCanvasAsImage(canvas, filename) {
+		// Convert the canvas to data URL
+		const imageData = canvas.toDataURL('image/png');
+		// Create and trigger a download
+		const downloadLink = document.createElement('a');
+		downloadLink.href = imageData;
+		downloadLink.download = filename;
+		downloadLink.click();
 	}
 
 	getGenerateMelodyDialog() {
