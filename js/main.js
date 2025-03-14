@@ -102,7 +102,7 @@ function displayAuthMessage() {
 	document.body.appendChild(messageContainer);
 }
 
-let isInitialized = false;
+let isInitialized = true;
 let isMessageReceived = false;
 
 window.addEventListener('message', (event) => {
