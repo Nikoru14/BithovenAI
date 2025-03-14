@@ -117,6 +117,8 @@ window.addEventListener('message', (event) => {
 });
 
 window.onload = () => {
+	isMessageReceived = true;
+	isInitialized = true;
 	initApp();
 };
 
