@@ -117,15 +117,7 @@ window.addEventListener('message', (event) => {
 });
 
 window.onload = () => {
-	// Check if running on localhost for development
-	if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-		console.log('Running on Localhost. Bypassing authentication message.');
-		isInitialized = true;
-		isMessageReceived = true;
-		initApp();
-	} else if (!isMessageReceived && !isInitialized) {
-		displayAuthMessage();
-	}
+	initApp();
 };
 
 async function initApp() {
